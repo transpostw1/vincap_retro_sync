@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  api-mapper:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - NEON_CONNECTION_STRING=postgresql://neondb_owner:npg_ziNBtp5sX4Fv@ep-quiet-forest-a53t111o-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - AUTH_API_URL=http://192.168.1.25:801
+      - RETRO_API_URL=http://192.168.1.25:801
+      - API_USERNAME=akshay
+      - API_PASSWORD=retroinv@123
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s 
