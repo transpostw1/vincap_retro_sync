@@ -371,8 +371,8 @@ class APINeonToRetroMapper:
 
     def _format_date_for_api(self, date_value: str) -> str:
         """Format date for Retro API (ISO format with timezone)"""
-        if not date_value or date_value == '':
-            return ''
+        if not date_value or date_value == '' or date_value == 'null':
+            return None
         
         try:
             # Try parsing as ISO format first
@@ -385,8 +385,8 @@ class APINeonToRetroMapper:
             # Format as ISO with timezone
             return parsed_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
         except:
-            # If parsing fails, return empty string
-            return ''
+            # If parsing fails, return None instead of empty string
+            return None
 
     def _generate_uuid(self) -> str:
         """Generate a simple UUID-like string"""
@@ -426,13 +426,19 @@ class APINeonToRetroMapper:
             
             # Add multiple gstData entries
             if '_gst_data_entries' in transformed_data:
+                logger.info(f"Adding {len(transformed_data['_gst_data_entries'])} gstData entries")
                 for gst_entry in transformed_data['_gst_data_entries']:
                     form_data.add_field('gstData', gst_entry)
+            else:
+                logger.warning("No gstData entries found in transformed data")
             
             # Add multiple aCostData entries
             if '_a_cost_data_entries' in transformed_data:
+                logger.info(f"Adding {len(transformed_data['_a_cost_data_entries'])} aCostData entries")
                 for cost_entry in transformed_data['_a_cost_data_entries']:
                     form_data.add_field('aCostData', cost_entry)
+            else:
+                logger.warning("No aCostData entries found in transformed data")
             
             async with aiohttp.ClientSession(cookies=self.session_cookies) as session:
                 async with session.post(
