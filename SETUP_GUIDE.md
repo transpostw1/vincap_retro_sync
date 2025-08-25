@@ -29,7 +29,7 @@ services:
   api-mapper:
     image: api-mapper:latest
     ports:
-      - "8000:8000"
+      - "8005:8000"
     environment:
       - NEON_CONNECTION_STRING=postgresql://neondb_owner:npg_ziNBtp5sX4Fv@ep-quiet-forest-a53t111o-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - AUTH_API_URL=http://192.168.1.25:801
@@ -50,10 +50,10 @@ docker-compose up -d
 
 ```bash
 # Check if service is running
-curl http://localhost:8000/health
+curl http://localhost:8005/health
 
 # Or in PowerShell:
-Invoke-RestMethod -Uri "http://localhost:8000/health" -Method GET
+Invoke-RestMethod -Uri "http://localhost:8005/health" -Method GET
 ```
 
 ## 🎯 **Usage Examples**
@@ -62,20 +62,20 @@ Invoke-RestMethod -Uri "http://localhost:8000/health" -Method GET
 
 ```bash
 # PowerShell
-Invoke-RestMethod -Uri "http://localhost:8000/list-records" -Method GET
+Invoke-RestMethod -Uri "http://localhost:8005/list-records" -Method GET
 
 # Or curl
-curl http://localhost:8000/list-records
+curl http://localhost:8005/list-records
 ```
 
 ### **Push Single Record**
 
 ```bash
 # PowerShell
-Invoke-RestMethod -Uri "http://localhost:8000/push" -Method POST -ContentType "application/json" -Body '{"record_id": 24}'
+Invoke-RestMethod -Uri "http://localhost:8005/push" -Method POST -ContentType "application/json" -Body '{"record_id": 24}'
 
 # Or curl
-curl -X POST http://localhost:8000/push \
+curl -X POST http://localhost:8005/push \
   -H "Content-Type: application/json" \
   -d '{"record_id": 24}'
 ```
@@ -84,10 +84,10 @@ curl -X POST http://localhost:8000/push \
 
 ```bash
 # PowerShell
-Invoke-RestMethod -Uri "http://localhost:8000/push" -Method POST -ContentType "application/json" -Body '{"limit": 5}'
+Invoke-RestMethod -Uri "http://localhost:8005/push" -Method POST -ContentType "application/json" -Body '{"limit": 5}'
 
 # Or curl
-curl -X POST http://localhost:8000/push \
+curl -X POST http://localhost:8005/push \
   -H "Content-Type: application/json" \
   -d '{"limit": 5}'
 ```
@@ -117,7 +117,7 @@ export default async function handler(req, res) {
   try {
     const { record_id, limit } = req.body;
 
-    const response = await fetch("http://localhost:8000/push", {
+    const response = await fetch("http://localhost:8005/push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -194,15 +194,15 @@ export default function PushForm() {
 # Check Docker logs
 docker-compose logs
 
-# Check if port 8000 is available
-netstat -an | findstr :8000
+# Check if port 8005 is available
+netstat -an | findstr :8005
 ```
 
 ### **Connection Issues**
 
 ```bash
 # Test connections
-Invoke-RestMethod -Uri "http://localhost:8000/test-connection" -Method GET
+Invoke-RestMethod -Uri "http://localhost:8005/test-connection" -Method GET
 ```
 
 ### **Image Loading Issues**
@@ -241,7 +241,7 @@ If you encounter any issues:
 
 1. Check the logs: `docker-compose logs`
 2. Verify Docker is running
-3. Ensure port 8000 is not in use
+3. Ensure port 8005 is not in use
 4. Test connections: `GET /test-connection`
 
 ---
