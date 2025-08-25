@@ -6,7 +6,9 @@ Provides REST API endpoints for the data migration functionality.
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import asyncio
 import os
@@ -20,8 +22,10 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Neon to Retro API Mapper",
-    description="API for migrating data from Neon database to Retro API",
-    version="1.0.0"
+    description="API for migrating data from Neon database to Retro API. Use this API to push invoice data from Neon database to the Retro system.",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Add CORS middleware
@@ -35,19 +39,50 @@ app.add_middleware(
 
 # Pydantic models for request/response
 class MigrationRequest(BaseModel):
-    record_id: Optional[int] = None
-    limit: Optional[int] = 10
-    table_name: str = "invoices"
+    record_id: Optional[int] = Field(None, description="Specific record ID to push. If provided, only this record will be processed.")
+    limit: Optional[int] = Field(10, description="Maximum number of records to process. Default is 10.")
+    table_name: str = Field("invoices", description="Name of the table to process. Default is 'invoices'.")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "record_id": 28,
+                "limit": 5,
+                "table_name": "invoices"
+            }
+        }
 
 class MigrationResponse(BaseModel):
-    success: bool
-    message: str
-    results: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    success: bool = Field(description="Whether the operation was successful")
+    message: str = Field(description="Human-readable message about the operation")
+    results: Optional[Dict[str, Any]] = Field(None, description="Detailed results of the migration")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "success": True,
+                "message": "Migration completed successfully",
+                "results": {
+                    "total": 1,
+                    "successful": 1,
+                    "failed": 0
+                },
+                "error": None
+            }
+        }
 
 class HealthResponse(BaseModel):
-    status: str
-    message: str
+    status: str = Field(description="Service status")
+    message: str = Field(description="Status message")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "status": "healthy",
+                "message": "Neon to Retro API Mapper is running"
+            }
+        }
 
 # Global mapper instance
 mapper = None
@@ -71,25 +106,45 @@ def get_mapper():
     
     return mapper
 
-@app.get("/", response_model=HealthResponse)
+@app.get("/", response_model=HealthResponse, tags=["Health"])
 async def root():
-    """Health check endpoint"""
+    """
+    Root endpoint - Health check
+    
+    Returns the health status of the API service.
+    """
     return HealthResponse(
         status="healthy",
         message="Neon to Retro API Mapper is running"
     )
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
-    """Health check endpoint"""
+    """
+    Health check endpoint
+    
+    Returns the health status of the API service.
+    """
     return HealthResponse(
         status="healthy",
         message="Neon to Retro API Mapper is running"
     )
 
-@app.post("/push", response_model=MigrationResponse)
+@app.post("/push", response_model=MigrationResponse, tags=["Migration"])
 async def push_data(request: MigrationRequest):
-    """Migrate data from Neon to Retro API"""
+    """
+    Push data from Neon database to Retro API
+    
+    This endpoint allows you to:
+    - Push a specific record by ID
+    - Push multiple records (up to a limit)
+    - Push all records from the specified table
+    
+    **Examples:**
+    - Push single record: `{"record_id": 28}`
+    - Push multiple records: `{"limit": 5}`
+    - Push all records: `{"limit": 1000}`
+    """
     try:
         logger.info(f"Starting migration with request: {request}")
         
@@ -124,9 +179,14 @@ async def push_data(request: MigrationRequest):
             error=str(e)
         )
 
-@app.post("/push/async", response_model=MigrationResponse)
+@app.post("/push/async", response_model=MigrationResponse, tags=["Migration"])
 async def push_data_async(request: MigrationRequest, background_tasks: BackgroundTasks):
-    """Migrate data asynchronously (fire and forget)"""
+    """
+    Push data asynchronously (fire and forget)
+    
+    This endpoint starts the migration in the background and returns immediately.
+    Useful for long-running operations.
+    """
     try:
         logger.info(f"Starting async migration with request: {request}")
         
@@ -159,9 +219,13 @@ async def run_push_async(request: MigrationRequest):
     except Exception as e:
         logger.error(f"Background push failed: {e}")
 
-@app.get("/mappings")
+@app.get("/mappings", tags=["Info"])
 async def get_mappings():
-    """Get field mappings information"""
+    """
+    Get field mappings information
+    
+    Returns the current field mappings configuration used for data transformation.
+    """
     try:
         mapper_instance = get_mapper()
         
@@ -183,8 +247,13 @@ async def get_mappings():
         logger.error(f"Error getting mappings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/list-records")
+@app.get("/list-records", tags=["Info"])
 async def list_records(limit: int = 5):
+    """
+    List available records from Neon database
+    
+    Returns a list of available records that can be pushed to the Retro API.
+    """
     """List available records in the database"""
     try:
         mapper_instance = get_mapper()
@@ -220,8 +289,13 @@ async def list_records(limit: int = 5):
         logger.error(f"Error listing records: {e}")
         return {"success": False, "error": str(e)}
 
-@app.get("/test-connection")
+@app.get("/test-connection", tags=["Health"])
 async def test_connection():
+    """
+    Test database and API connections
+    
+    Tests the connection to both Neon database and Retro API to ensure everything is working.
+    """
     """Test database and API connections"""
     try:
         mapper_instance = get_mapper()
