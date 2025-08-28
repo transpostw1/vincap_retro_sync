@@ -283,15 +283,27 @@ class APINeonToRetroMapper:
             
             # Add tax details if present
             if api_data.get('tax_details'):
+                logger.info(f"Processing tax_details: {api_data['tax_details']}")
                 try:
                     tax_details = json.loads(api_data['tax_details'])
+                    logger.info(f"Parsed tax_details: {tax_details}")
                     for i, tax in enumerate(tax_details):
+                        # Extract values from Neon data
+                        tax_rate = float(tax.get('tax_rate', 0))
+                        base_amount = float(tax.get('amount', 0))
+                        
+                        # Calculate tax amount and total
+                        tax_amount = (base_amount * tax_rate) / 100
+                        total_amount = base_amount + tax_amount
+                        
+                        logger.info(f"GST Entry {i}: Rate={tax_rate}%, Amount={base_amount}, TaxAmount={tax_amount}, Total={total_amount}")
+                        
                         gst_data_entries.append(json.dumps({
-                            'Rate': float(tax.get('tax_rate', 0)),
-                            'Amount': float(tax.get('amount', 0)),
+                            'Rate': tax_rate,
+                            'Amount': base_amount,
                             'HSN_SAC': tax.get('hsn_sac', ''),
-                            'TaxTotal': float(tax.get('tax_rate', 0)),
-                            'Total': float(tax.get('amount', 0)),
+                            'TaxTotal': tax_amount,
+                            'Total': total_amount,
                             'GSTType': 'na',
                             'IGST': float(tax.get('igst', 0)),
                             'CGST': float(tax.get('cgst', 0)),
@@ -299,7 +311,8 @@ class APINeonToRetroMapper:
                             'externalid': '',
                             'GSTRate': f"22!G!{self._generate_uuid()}"
                         }))
-                except:
+                except Exception as e:
+                    logger.error(f"Error processing tax_details: {e}")
                     pass
             
             # Add default GST data entries for all tax rates (0%, 3%, 5%, 12%, 18%, 28%)
@@ -326,21 +339,34 @@ class APINeonToRetroMapper:
             
             # Add additional costs if present
             if api_data.get('additional_costs'):
+                logger.info(f"Processing additional_costs: {api_data['additional_costs']}")
                 try:
                     additional_costs = json.loads(api_data['additional_costs'])
+                    logger.info(f"Parsed additional_costs: {additional_costs}")
                     for i, cost in enumerate(additional_costs):
+                        # Extract values from Neon data
+                        cost_amount = float(cost.get('amount', 0))
+                        cost_tax_rate = float(cost.get('tax_rate', 0))
+                        
+                        # Calculate tax amount and total
+                        cost_tax_amount = (cost_amount * cost_tax_rate) / 100
+                        cost_total = cost_amount + cost_tax_amount
+                        
+                        logger.info(f"Cost Entry {i}: Name={cost.get('type', '')}, Amount={cost_amount}, TaxRate={cost_tax_rate}%, TaxAmount={cost_tax_amount}, Total={cost_total}")
+                        
                         a_cost_data_entries.append(json.dumps({
                             'Name': cost.get('type', ''),
                             'HSN_SAC': cost.get('hsn_sac', ''),
-                            'Amount': float(cost.get('amount', 0)),
-                            'GSTRate': '',
-                            'TaxTotal': 0,
-                            'Total': float(cost.get('amount', 0)),
-                            'TaxAmount': 0,
+                            'Amount': cost_amount,
+                            'GSTRate': f"22!G!{self._generate_uuid()}" if cost_tax_rate > 0 else '',
+                            'TaxTotal': cost_tax_amount,
+                            'Total': cost_total,
+                            'TaxAmount': cost_tax_amount,
                             'externalId': '',
                             'AdditionalCost': f"1!G!{self._generate_uuid()}"
                         }))
-                except:
+                except Exception as e:
+                    logger.error(f"Error processing additional_costs: {e}")
                     pass
             
             # Add default additional cost entries if none present
