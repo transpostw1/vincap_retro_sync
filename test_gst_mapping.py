@@ -81,8 +81,23 @@ def test_gst_mapping():
     # Verify calculations
     print("✅ Verification:")
     
-    # Check GST calculations
+    # Check that ALL 6 GST rates are present
     gst_entries = [json.loads(entry) for entry in transformed_data.get('_gst_data_entries', [])]
+    expected_rates = [0, 3, 5, 12, 18, 28]
+    actual_rates = [gst['Rate'] for gst in gst_entries]
+    
+    print(f"  Expected GST rates: {expected_rates}")
+    print(f"  Actual GST rates: {actual_rates}")
+    
+    if set(actual_rates) == set(expected_rates):
+        print(f"  ✅ All 6 GST rates are present!")
+    else:
+        missing_rates = set(expected_rates) - set(actual_rates)
+        extra_rates = set(actual_rates) - set(expected_rates)
+        print(f"  ❌ Missing GST rates: {missing_rates}")
+        print(f"  ❌ Extra GST rates: {extra_rates}")
+    
+    # Check GST calculations
     for gst in gst_entries:
         if gst['Rate'] == 3 and gst['Amount'] == 5000:
             expected_tax = (5000 * 3) / 100  # 150
@@ -102,6 +117,11 @@ def test_gst_mapping():
                 print(f"  ✅ Courier Charge calculation correct: {cost['Amount']} + {cost['TaxTotal']} = {cost['Total']}")
             else:
                 print(f"  ❌ Courier Charge calculation wrong: Expected TaxTotal={expected_tax}, Total={expected_total}, Got TaxTotal={cost['TaxTotal']}, Total={cost['Total']}")
+    
+    # Show total count of entries
+    print(f"\n📊 Summary:")
+    print(f"  GST entries sent: {len(gst_entries)}")
+    print(f"  Additional cost entries sent: {len(cost_entries)}")
 
 if __name__ == "__main__":
     test_gst_mapping() 

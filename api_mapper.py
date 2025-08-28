@@ -281,45 +281,48 @@ class APINeonToRetroMapper:
             # Store GST data entries separately for multiple form fields
             gst_data_entries = []
             
-            # Add tax details if present
+            # Create a map of existing tax data from Neon
+            existing_tax_data = {}
             if api_data.get('tax_details'):
                 logger.info(f"Processing tax_details: {api_data['tax_details']}")
                 try:
                     tax_details = json.loads(api_data['tax_details'])
                     logger.info(f"Parsed tax_details: {tax_details}")
-                    for i, tax in enumerate(tax_details):
-                        # Extract values from Neon data
+                    for tax in tax_details:
                         tax_rate = float(tax.get('tax_rate', 0))
-                        base_amount = float(tax.get('amount', 0))
-                        
-                        # Calculate tax amount and total
-                        tax_amount = (base_amount * tax_rate) / 100
-                        total_amount = base_amount + tax_amount
-                        
-                        logger.info(f"GST Entry {i}: Rate={tax_rate}%, Amount={base_amount}, TaxAmount={tax_amount}, Total={total_amount}")
-                        
-                        gst_data_entries.append(json.dumps({
-                            'Rate': tax_rate,
-                            'Amount': base_amount,
-                            'HSN_SAC': tax.get('hsn_sac', ''),
-                            'TaxTotal': tax_amount,
-                            'Total': total_amount,
-                            'GSTType': 'na',
-                            'IGST': float(tax.get('igst', 0)),
-                            'CGST': float(tax.get('cgst', 0)),
-                            'SGST': float(tax.get('sgst', 0)),
-                            'externalid': '',
-                            'GSTRate': f"22!G!{self._generate_uuid()}"
-                        }))
+                        existing_tax_data[tax_rate] = tax
                 except Exception as e:
                     logger.error(f"Error processing tax_details: {e}")
-                    pass
             
-            # Add default GST data entries for all tax rates (0%, 3%, 5%, 12%, 18%, 28%)
-            # This matches the curl example structure
-            if not gst_data_entries:
-                default_gst_rates = [0, 3, 5, 12, 18, 28]
-                for rate in default_gst_rates:
+            # ALWAYS add ALL required GST rates (0%, 3%, 5%, 12%, 18%, 28%)
+            # This ensures the Retro API receives all expected rates
+            required_gst_rates = [0, 3, 5, 12, 18, 28]
+            for rate in required_gst_rates:
+                if rate in existing_tax_data:
+                    # Use data from Neon
+                    tax = existing_tax_data[rate]
+                    base_amount = float(tax.get('amount', 0))
+                    tax_amount = (base_amount * rate) / 100
+                    total_amount = base_amount + tax_amount
+                    
+                    logger.info(f"GST Entry for {rate}%: Amount={base_amount}, TaxAmount={tax_amount}, Total={total_amount}")
+                    
+                    gst_data_entries.append(json.dumps({
+                        'Rate': rate,
+                        'Amount': base_amount,
+                        'HSN_SAC': tax.get('hsn_sac', ''),
+                        'TaxTotal': tax_amount,
+                        'Total': total_amount,
+                        'GSTType': 'na',
+                        'IGST': float(tax.get('igst', 0)),
+                        'CGST': float(tax.get('cgst', 0)),
+                        'SGST': float(tax.get('sgst', 0)),
+                        'externalid': '',
+                        'GSTRate': f"22!G!{self._generate_uuid()}"
+                    }))
+                else:
+                    # Send empty entry for this rate
+                    logger.info(f"GST Entry for {rate}%: No data in Neon, sending empty entry")
                     gst_data_entries.append(json.dumps({
                         'Rate': rate,
                         'Amount': 0,
