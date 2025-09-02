@@ -297,15 +297,33 @@ class APINeonToRetroMapper:
             if api_data.get('tax_details'):
                 logger.info(f"Processing tax_details: {api_data['tax_details']}")
                 try:
-                    tax_details = json.loads(api_data['tax_details'])
+                    # Handle both string and list formats
+                    if isinstance(api_data['tax_details'], str):
+                        tax_details = json.loads(api_data['tax_details'])
+                    else:
+                        tax_details = api_data['tax_details']
+                    
                     logger.info(f"Parsed tax_details: {tax_details}")
                     # Ensure tax_details is a list and not None
                     if isinstance(tax_details, list) and tax_details:
                         for tax in tax_details:
                             if isinstance(tax, dict):
                                 tax_rate = float(tax.get('tax_rate', 0))
+                                # Calculate base amount from SGST/CGST values
+                                sgst = float(tax.get('sgst', 0))
+                                cgst = float(tax.get('cgst', 0))
+                                igst = float(tax.get('igst', 0))
+                                
+                                # Base amount = (SGST + CGST + IGST) / tax_rate * 100
+                                if tax_rate > 0:
+                                    base_amount = (sgst + cgst + igst) / tax_rate * 100
+                                else:
+                                    base_amount = 0
+                                
+                                # Store the calculated base amount
+                                tax['calculated_amount'] = base_amount
                                 existing_tax_data[tax_rate] = tax
-                                logger.info(f"  Found tax rate {tax_rate}% with amount: {tax.get('amount', 0)}")
+                                logger.info(f"  Found tax rate {tax_rate}% with SGST={sgst}, CGST={cgst}, IGST={igst}, calculated base amount={base_amount}")
                     else:
                         logger.warning(f"tax_details is not a valid list: {type(tax_details)}")
                 except Exception as e:
@@ -322,7 +340,7 @@ class APINeonToRetroMapper:
                 if rate in existing_tax_data:
                     # Use data from Neon
                     tax = existing_tax_data[rate]
-                    base_amount = float(tax.get('amount', 0))
+                    base_amount = tax.get('calculated_amount', 0)  # Use calculated amount
                     tax_amount = (base_amount * rate) / 100
                     total_amount = base_amount + tax_amount
                     
@@ -365,7 +383,12 @@ class APINeonToRetroMapper:
             if api_data.get('additional_costs'):
                 logger.info(f"Processing additional_costs: {api_data['additional_costs']}")
                 try:
-                    additional_costs = json.loads(api_data['additional_costs'])
+                    # Handle both string and list formats
+                    if isinstance(api_data['additional_costs'], str):
+                        additional_costs = json.loads(api_data['additional_costs'])
+                    else:
+                        additional_costs = api_data['additional_costs']
+                    
                     logger.info(f"Parsed additional_costs: {additional_costs}")
                     # Ensure additional_costs is a list and not None
                     if isinstance(additional_costs, list) and additional_costs:
