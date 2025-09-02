@@ -1,0 +1,51 @@
+Summary,Description,Reporter,Priority,Impact,Affected Portals,Affected Service
+User Management - Alternative Number,Option to add alterative number is not working. (Front),abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,User Management
+User Management - Gender Field,Option to add gender is not working (Front end),abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,User Management
+User Management - Customer Image,Customer cannot change his/her image.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,User Management
+Product Catalog - Bulk Upload,Product update in bulk takes time to upload.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Product Catalog
+Product Catalog - Multi-filtration,Multi-filtration didn't work.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Product Catalog
+Product Catalog - NAN Pricing,Product value shows NAN pricing after we upload products in bulk.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Product Catalog
+Product Catalog - Keyword Search,Single word keywords are not searchable e.g. 'Rings' or 'Ring'.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Product Catalog
+Shopping Cart - Wallet Checkbox,Wallet checkbox is not clickable in step 1,abhijeet@whpjewellers.in,Medium,Moderate / Limited,,
+Shopping Cart - Page Blink,When we try scroll down in third step page started to blink.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Shopping Cart - Wallet Amount,Not getting chance to check wallet amount calculation on cart page.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Shopping Cart - WHP Wallet,WHPP wallet option is not usable as there is no way to add money into user's wallet.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Shopping Cart - Gift Voucher,Even after applied gift voucher successfully amount is not getting minus from the product cost.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Shopping Cart - Platform Coupon,Did not got chance to check platform based coupon code process. As apps are not live.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Shopping Cart - Discount URL,Discount URL is pending.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Shopping Cart - Backend Double Entry,Two entries are getting captured in the backend after made purchase of gift voucher - one is in coupons and another is in voucher section.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Shopping Cart
+Order Management - Deactivated Codes,Deactivated codes are also getting applied while placing offline order in backend. (Code: NIT20),abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Order Management
+Order Management - No Notifications,"Customer are not receiving notification after placing the order – Whatsapp, Email or SMS related to order status, shipped, payment pending, delivered, etc.",abhijeet@whpjewellers.in,Medium,Moderate / Limited,,
+Order Management - Wrong Time,Wrong time is getting captured in order excel sheet.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Order Management
+Order Management - Export Columns K & L,Column 'K' & 'L' showing incorrect data (export sheet),abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Order Management
+Order Management - Export Column H,Column 'H' showing incorrect data (export sheet),abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Order Management
+Order Management - Missing Columns,"Order status, Order tracking no., Amount Paid, Customer ID, State, City, Pin Code, Remark columns are not there in the export sheet",abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Order Management
+Order Management - Resend Option,Option to resent the order status/Order confirmation.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Order Management
+Payment Gateway - Backup Needed,Backup payment gateway needs to add (PayU).,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Payment Gateway
+Reviews and Ratings - Cannot Post Reviews,Not able to post reviews.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Reviews and Ratings
+Reviews and Ratings - Backend Verification,As not able to post review failed to check backend module.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Reviews and Ratings
+Reviews and Ratings - Bulk Upload,Unable to upload bulk sheet.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Reviews and Ratings
+Seasonal Collection,"As we discussed, we don’t have non-coder friendly backend – we have planned to integrate shopify. Through which we can add multiple pages for season campaigns, collections etc",abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Collection
+Notification - Backend & Customer Notifications - Backend,Backend operator not receiving notification on Email or backend,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Notification
+Notification - Backend & Customer Notifications - Customer,User not receiving notification. Email or whatsapp,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Notification
+Notification - Backend & Customer Notifications - Push,Push notifications to customers (on app and website),abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Notification
+Notification - Customer Alerts,"To customer: Order Cancelled, Order Refund, Abandoned Checkout, Payment Reminder, Out for Delivery, Delivered, Return Request, Return Request confirmation, Return Request declined, Replace Request, Replace Request confirmation, Replace Request declined, Order Placed, COD Order Confirmation, Marketing Communications).",abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Notification
+Notification - Backend Alerts,"Backend users: order received, order cancelled, new product upload, gold rate update, banner upload on website/app, review upload, diamond rates update, customer feedback, push notification send to the customer, lead generated, discounts applied on products",abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Notification
+Analytics - Product Level Tracking,Product level sales and traffic tracking is not there.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Analytics
+Image Processing - Management Tools,Option for Image and video bank through which we can manage video meta title,abhijeet@whpjewellers.in,Medium,Moderate / Limited,,
+Search - Keyword Issues,Keywords with single words not showing results properly. Example: Ring or Rings.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Search
+Content Management - CMS & Pages,"As discussed, current CMS not user friendly requested to connect with Shopify for landing pages.",abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Content Management
+Content Management - About Us & Career,About us and career page design,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Content Management
+Customer Support - Queries,Queries send from product page are not getting captured in the backend.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Customer Support
+Admin Services - Verification Needed,,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Admin Services
+Offers and Discounts - Calculation Issues,Wrong calculation is appearing for coupon code. Created coupon 10% OFF on silver product. But only Rs. 488/- is getting applied to the same.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Offers and Discounts
+Exchange and Buy Back - Removed,Task were removed from the requirement.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Exchange and Buy Back
+Refund Service - Manual Process,Manual process is there. Not integrated with the backend.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Refund Service
+Gold Saving Scheme - Verification Needed,Module needs to be checked end-to-end.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Gold Saving Scheme
+Reward and Loyalty - Verification Needed,,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Reward and Loyalty
+Online Store - Website Status,Website - live,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Online Store
+Online Store - iOS App,iOS App - Pending,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Online Store
+Online Store - Android App,Android App - Pending,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Online Store
+Analytics - Traffic & Sales,Product level traffic,abhijeet@whpjewellers.in,Medium,Moderate / Limited,,
+Vendor APIs - Verification Needed,,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Vendor API's Endpoints
+Offers & Discounts: Discount Code/Coupon - Site Wide,We don't have option to give specific coupon code to the particular user. Whatever coupon we add it started showing site wide.,abhijeet@whpjewellers.in,Medium,Moderate / Limited,Website,Offers and Discounts: Discount Code & Coupon Code
