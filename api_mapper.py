@@ -305,7 +305,7 @@ class APINeonToRetroMapper:
                     
                     logger.info(f"Parsed tax_details: {tax_details}")
                     # Ensure tax_details is a list and not None
-                    if isinstance(tax_details, list) and tax_details:
+                    if isinstance(tax_details, list) and len(tax_details) > 0:
                         for tax in tax_details:
                             if isinstance(tax, dict):
                                 tax_rate = float(tax.get('tax_rate', 0))
@@ -391,7 +391,7 @@ class APINeonToRetroMapper:
                     
                     logger.info(f"Parsed additional_costs: {additional_costs}")
                     # Ensure additional_costs is a list and not None
-                    if isinstance(additional_costs, list) and additional_costs:
+                    if isinstance(additional_costs, list) and len(additional_costs) > 0:
                         for i, cost in enumerate(additional_costs):
                             if isinstance(cost, dict):
                                 # Extract values from Neon data
