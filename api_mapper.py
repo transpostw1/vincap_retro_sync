@@ -281,7 +281,7 @@ class APINeonToRetroMapper:
                     'isServicePurchaseOrder': True,
                     'TakeOverExpense': False
                 },
-                'masterEdit': 'false'
+                'masterEdit': False
             }
             
             logger.info(f"  Calculated TotalAmount: {retro_data['data']['TotalAmount']}")
@@ -333,7 +333,7 @@ class APINeonToRetroMapper:
             
             # ALWAYS add ALL required GST rates (0%, 3%, 5%, 12%, 18%, 28%)
             # This ensures the Retro API receives all expected rates
-            required_gst_rates = [0, 3, 5, 12, 18, 28]
+            required_gst_rates = [0.0, 3.0, 5.0, 12.0, 18.0, 28.0]
             logger.info(f"Processing {len(required_gst_rates)} required GST rates: {required_gst_rates}")
             
             for rate in required_gst_rates:
