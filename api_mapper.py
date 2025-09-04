@@ -85,7 +85,9 @@ class APINeonToRetroMapper:
             
             auth_url = f"{self.auth_api_url}/Authentication/AuthenticateUser?userName={self.username}&password={self.password}"
             
-            async with aiohttp.ClientSession() as session:
+            # Increase timeout to handle network delays
+            timeout = aiohttp.ClientTimeout(total=60)  # 60 second timeout
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(auth_url, headers=headers, data='') as response:
                     if response.status == 200:
                         response_text = await response.text()
@@ -267,7 +269,7 @@ class APINeonToRetroMapper:
                     'externalId': '',
                     'Organization': api_data.get('org_id', ''),
                     'Department': api_data.get('department', ''),
-                    'TotalAmount': float(api_data.get('total_amount', 0)),
+                    'TotalAmount': int(float(api_data.get('total_amount', 0))),
                     'AdditionalCostTotal': None,
                     'GSTTotal': None,
                     'CostCenter': '14!G!d490d9af-a497-4ea6-b807-cbbeae42c35b',
@@ -294,19 +296,40 @@ class APINeonToRetroMapper:
             
             # Create a map of existing tax data from Neon
             existing_tax_data = {}
+            logger.info(f"DEBUG: About to check tax_details. api_data.get('tax_details') = {api_data.get('tax_details')}")
+            logger.info(f"DEBUG: Type of raw tax_details = {type(api_data.get('tax_details'))}")
             if api_data.get('tax_details'):
                 logger.info(f"Processing tax_details: {api_data['tax_details']}")
                 try:
                     # Handle both string and list formats
-                    if isinstance(api_data['tax_details'], str):
-                        tax_details = json.loads(api_data['tax_details'])
+                    tax_details_raw = api_data['tax_details']
+                    if isinstance(tax_details_raw, str):
+                        logger.info(f"BEFORE json.loads: {tax_details_raw[:100]}...")
+                        try:
+                            # Try parsing once
+                            first_parse_result = json.loads(tax_details_raw)
+                            logger.info(f"FIRST json.loads: type={type(first_parse_result)}, value={first_parse_result}")
+                            
+                            # If still a string, try parsing again (double-encoded)
+                            if isinstance(first_parse_result, str):
+                                logger.info("Still string after first parse, trying again...")
+                                final_parsed_tax_data = json.loads(first_parse_result)
+                                logger.info(f"SECOND json.loads: type={type(final_parsed_tax_data)}, value={final_parsed_tax_data}")
+                            else:
+                                final_parsed_tax_data = first_parse_result
+                                
+                        except Exception as e:
+                            logger.error(f"json.loads FAILED: {e}")
+                            final_parsed_tax_data = []  # Use empty list as fallback
                     else:
-                        tax_details = api_data['tax_details']
+                        final_parsed_tax_data = tax_details_raw
                     
-                    logger.info(f"Parsed tax_details: {tax_details}")
-                    # Ensure tax_details is a list and not None
-                    if isinstance(tax_details, list) and len(tax_details) > 0:
-                        for tax in tax_details:
+                    logger.info(f"Final parsed tax_details: {final_parsed_tax_data}")
+                    logger.info(f"DEBUG: final_parsed_tax_data type = {type(final_parsed_tax_data)}")
+                    logger.info(f"DEBUG: isinstance(final_parsed_tax_data, list) = {isinstance(final_parsed_tax_data, list)}")
+                    
+                    if isinstance(final_parsed_tax_data, list) and len(final_parsed_tax_data) > 0:
+                        for tax in final_parsed_tax_data:
                             if isinstance(tax, dict):
                                 tax_rate = float(tax.get('tax_rate', 0))
                                 # Calculate base amount from SGST/CGST values
@@ -325,7 +348,7 @@ class APINeonToRetroMapper:
                                 existing_tax_data[tax_rate] = tax
                                 logger.info(f"  Found tax rate {tax_rate}% with SGST={sgst}, CGST={cgst}, IGST={igst}, calculated base amount={base_amount}")
                     else:
-                        logger.warning(f"tax_details is not a valid list: {type(tax_details)}")
+                        logger.warning(f"final_parsed_tax_data is not a valid list: {type(final_parsed_tax_data)}")
                 except Exception as e:
                     logger.error(f"Error processing tax_details: {e}")
                     # If parsing fails, treat as empty list
@@ -347,15 +370,15 @@ class APINeonToRetroMapper:
                     logger.info(f"  ✅ GST Entry for {rate}%: BaseAmount={base_amount}, TaxAmount={tax_amount}, Total={total_amount}")
                     
                     gst_data_entries.append(json.dumps({
-                        'Rate': rate,
-                        'Amount': base_amount,
+                        'Rate': int(rate),
+                        'Amount': int(base_amount),
                         'HSN_SAC': tax.get('hsn_sac', ''),
-                        'TaxTotal': tax_amount,
-                        'Total': total_amount,
+                        'TaxTotal': int(tax_amount),
+                        'Total': int(total_amount),
                         'GSTType': 'na',
-                        'IGST': float(tax.get('igst', 0)),
-                        'CGST': float(tax.get('cgst', 0)),
-                        'SGST': float(tax.get('sgst', 0)),
+                        'IGST': int(tax.get('igst', 0)),
+                        'CGST': int(tax.get('cgst', 0)),
+                        'SGST': int(tax.get('sgst', 0)),
                         'externalid': '',
                         'GSTRate': f"22!G!{self._generate_uuid()}"
                     }))
@@ -363,7 +386,7 @@ class APINeonToRetroMapper:
                     # Send empty entry for this rate
                     logger.info(f"  ⚠️ GST Entry for {rate}%: No data in Neon, sending empty entry")
                     gst_data_entries.append(json.dumps({
-                        'Rate': rate,
+                        'Rate': int(rate),
                         'Amount': 0,
                         'HSN_SAC': '',
                         'TaxTotal': 0,
@@ -384,15 +407,29 @@ class APINeonToRetroMapper:
                 logger.info(f"Processing additional_costs: {api_data['additional_costs']}")
                 try:
                     # Handle both string and list formats
-                    if isinstance(api_data['additional_costs'], str):
-                        additional_costs = json.loads(api_data['additional_costs'])
+                    additional_costs_raw = api_data['additional_costs']
+                    if isinstance(additional_costs_raw, str):
+                        try:
+                            # Try parsing once
+                            first_cost_parse = json.loads(additional_costs_raw)
+                            
+                            # If still a string, try parsing again (double-encoded)
+                            if isinstance(first_cost_parse, str):
+                                final_parsed_cost_data = json.loads(first_cost_parse)
+                            else:
+                                final_parsed_cost_data = first_cost_parse
+                                
+                        except Exception as e:
+                            logger.error(f"additional_costs json.loads FAILED: {e}")
+                            final_parsed_cost_data = []  # Use empty list as fallback
                     else:
-                        additional_costs = api_data['additional_costs']
+                        final_parsed_cost_data = additional_costs_raw
                     
-                    logger.info(f"Parsed additional_costs: {additional_costs}")
-                    # Ensure additional_costs is a list and not None
-                    if isinstance(additional_costs, list) and len(additional_costs) > 0:
-                        for i, cost in enumerate(additional_costs):
+                    logger.info(f"Final parsed additional_costs: {final_parsed_cost_data}")
+                    logger.info(f"DEBUG: final_parsed_cost_data type = {type(final_parsed_cost_data)}")
+                    # Ensure final_parsed_cost_data is a list and not None
+                    if isinstance(final_parsed_cost_data, list) and len(final_parsed_cost_data) > 0:
+                        for i, cost in enumerate(final_parsed_cost_data):
                             if isinstance(cost, dict):
                                 # Extract values from Neon data
                                 cost_amount = float(cost.get('amount', 0))
@@ -407,16 +444,16 @@ class APINeonToRetroMapper:
                                 a_cost_data_entries.append(json.dumps({
                                     'Name': cost.get('type', ''),
                                     'HSN_SAC': cost.get('hsn_sac', ''),
-                                    'Amount': cost_amount,
+                                    'Amount': int(cost_amount),
                                     'GSTRate': f"22!G!{self._generate_uuid()}" if cost_tax_rate > 0 else '',
-                                    'TaxTotal': cost_tax_amount,
-                                    'Total': cost_total,
-                                    'TaxAmount': cost_tax_amount,
+                                    'TaxTotal': int(cost_tax_amount),
+                                    'Total': int(cost_total),
+                                    'TaxAmount': int(cost_tax_amount),
                                     'externalId': '',
                                     'AdditionalCost': f"1!G!{self._generate_uuid()}"
                                 }))
                     else:
-                        logger.warning(f"additional_costs is not a valid list: {type(additional_costs)}")
+                        logger.warning(f"final_parsed_cost_data is not a valid list: {type(final_parsed_cost_data)}")
                 except Exception as e:
                     logger.error(f"Error processing additional_costs: {e}")
                     # If parsing fails, continue with empty list
@@ -474,6 +511,20 @@ class APINeonToRetroMapper:
         """Generate a simple UUID-like string"""
         import uuid
         return str(uuid.uuid4())
+    
+    def _convert_floats_to_ints(self, data):
+        """Convert float values to integers in a dictionary recursively"""
+        if isinstance(data, dict):
+            result = {}
+            for key, value in data.items():
+                if isinstance(value, float) and value.is_integer():
+                    result[key] = int(value)
+                elif isinstance(value, dict):
+                    result[key] = self._convert_floats_to_ints(value)
+                else:
+                    result[key] = value
+            return result
+        return data
 
     async def send_to_api(self, api_data: Dict[str, Any]) -> bool:
         """Send single record to API endpoint"""
@@ -533,22 +584,34 @@ class APINeonToRetroMapper:
                 if key.startswith('_'):
                     continue  # Skip internal fields
                 if value is not None and value != "":
-                    form_data.add_field(key, str(value))
-                    logger.info(f"  📝 Form field '{key}': {value}")
+                    # Special handling for different value types
+                    if isinstance(value, bool):
+                        str_value = 'true' if value else 'false'
+                    elif isinstance(value, dict):
+                        # Convert dictionaries to JSON strings (like the 'data' field)
+                        # First convert any float values to integers for API compatibility
+                        cleaned_dict = self._convert_floats_to_ints(value)
+                        str_value = json.dumps(cleaned_dict)
+                    else:
+                        str_value = str(value)
+                    form_data.add_field(key, str_value)
+                    logger.info(f"  📝 Form field '{key}': {str_value}")
             
-            # Add multiple gstData entries
+            # Add multiple gstData entries (already JSON stringified)
             if '_gst_data_entries' in transformed_data:
                 logger.info(f"➕ Adding {len(transformed_data['_gst_data_entries'])} gstData entries to form")
                 for i, gst_entry in enumerate(transformed_data['_gst_data_entries']):
+                    # gst_entry is already a JSON string from transformation
                     form_data.add_field('gstData', gst_entry)
                     logger.info(f"    ✅ Added gstData[{i}]: {gst_entry}")
             else:
                 logger.warning("❌ No gstData entries found in transformed data")
             
-            # Add multiple aCostData entries
+            # Add multiple aCostData entries (already JSON stringified)
             if '_a_cost_data_entries' in transformed_data:
                 logger.info(f"➕ Adding {len(transformed_data['_a_cost_data_entries'])} aCostData entries to form")
                 for i, cost_entry in enumerate(transformed_data['_a_cost_data_entries']):
+                    # cost_entry is already a JSON string from transformation
                     form_data.add_field('aCostData', cost_entry)
                     logger.info(f"    ✅ Added aCostData[{i}]: {cost_entry}")
             else:
@@ -562,7 +625,9 @@ class APINeonToRetroMapper:
             
             logger.info("=" * 80)
             
-            async with aiohttp.ClientSession(cookies=self.session_cookies) as session:
+            # Increase timeout to handle network delays
+            timeout = aiohttp.ClientTimeout(total=60)  # 60 second timeout
+            async with aiohttp.ClientSession(cookies=self.session_cookies, timeout=timeout) as session:
                 async with session.post(
                     f"{self.retro_api_url}/InvoiceManager/AddUpdateInvoice",
                     headers=headers,
