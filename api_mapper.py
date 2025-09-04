@@ -164,6 +164,16 @@ class APINeonToRetroMapper:
                 data.append(row_dict)
             
             logger.info(f"Fetched {len(data)} records from Neon database")
+            
+            # DEBUG: Log the actual data fetched
+            for i, record in enumerate(data):
+                logger.info(f"🔍 NEON RECORD {i+1}:")
+                logger.info(f"  Record keys: {list(record.keys())}")
+                logger.info(f"  invoice_no: {record.get('invoice_no', 'NOT_FOUND')}")
+                logger.info(f"  total_amount: {record.get('total_amount', 'NOT_FOUND')}")
+                logger.info(f"  vendor_id: {record.get('vendor_id', 'NOT_FOUND')}")
+                logger.info(f"  Full record: {record}")
+                
             return data
             
         except Exception as e:
@@ -171,21 +181,20 @@ class APINeonToRetroMapper:
             return []
 
     def transform_data_for_api(self, neon_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Transform Neon data to API format"""
+        """Transform Neon data to Retro API format"""
         transformed_data = []
         
         for record in neon_data:
+            # First do basic field mapping
             api_data = {}
-            
-            # Map fields based on the mapping dictionary
             for neon_field, api_field in self.field_mappings.items():
                 neon_value = record.get(neon_field)
-                
-                # Apply field-specific transformations
                 transformed_value = self._apply_field_transformations(neon_field, neon_value)
                 api_data[api_field] = transformed_value
             
-            transformed_data.append(api_data)
+            # Then apply Retro-specific transformation
+            retro_data = self._transform_for_retro_api(api_data)
+            transformed_data.append(retro_data)
         
         logger.info(f"Transformed {len(transformed_data)} records for API")
         return transformed_data
@@ -256,7 +265,7 @@ class APINeonToRetroMapper:
                     'DueDate': self._format_date_for_api(api_data.get('invoice_due_date', '')),
                     'ReceivedDate': self._format_date_for_api(api_data.get('received_date', '')),
                     'CounterParty': api_data.get('vendor_id', ''),
-                    'ReferenceNumber': api_data.get('invoice_no', ''),
+                    'ReferenceNumber': f"FINAL-TEST-{datetime.now().strftime('%m%d%H%M%S')}",
                     'Type': api_data.get('invoice_type', ''),
                     'SubTotal': None,
                     'Remark': f"For testing on {datetime.now().strftime('%d/%m/%Y')}",
@@ -269,9 +278,9 @@ class APINeonToRetroMapper:
                     'externalId': '',
                     'Organization': api_data.get('org_id', ''),
                     'Department': api_data.get('department', ''),
-                    'TotalAmount': int(float(api_data.get('total_amount', 0))),
-                    'AdditionalCostTotal': None,
-                    'GSTTotal': None,
+                    'Total': int(float(api_data.get('total_amount', 0))),
+                    'AdditionalCost': 0,  # Will be calculated below
+                    'GstTotal': 0,  # Will be calculated below
                     'CostCenter': '14!G!d490d9af-a497-4ea6-b807-cbbeae42c35b',
                     'CorrespondingProformaInvoice': api_data.get('corresponding_proforma_invoice', ''),
                     'CorrespondingProformaInvoiceExternalId': '',
@@ -283,13 +292,12 @@ class APINeonToRetroMapper:
                     'isServicePurchaseOrder': True,
                     'TakeOverExpense': False
                 },
-                'masterEdit': False
+                'masterEdit': 'false'
             }
             
             logger.info(f"  Calculated TotalAmount: {retro_data['data']['TotalAmount']}")
             
-            # Convert data to JSON string
-            retro_data['data'] = json.dumps(retro_data['data'])
+            # Keep data as dict for now, will convert to JSON string later in send_to_api
             
             # Store GST data entries separately for multiple form fields
             gst_data_entries = []
@@ -475,9 +483,41 @@ class APINeonToRetroMapper:
                         'AdditionalCost': f"1!G!{self._generate_uuid()}"
                     }))
             
+            # Calculate totals from the actual entries
+            total_gst = 0
+            total_additional_cost = 0
+            
+            for gst_entry_json in gst_data_entries:
+                gst_entry = json.loads(gst_entry_json)
+                total_gst += gst_entry.get('TaxTotal', 0)
+                
+            for cost_entry_json in a_cost_data_entries:
+                cost_entry = json.loads(cost_entry_json)
+                total_additional_cost += cost_entry.get('Total', 0)
+            
+            # Update the main data with calculated totals (using exact Retro field names)
+            retro_data['data']['GstTotal'] = total_gst
+            retro_data['data']['AdditionalCost'] = total_additional_cost
+            
+            # Calculate SubTotal (Total - GstTotal - AdditionalCost)
+            total_amount = retro_data['data']['Total']
+            retro_data['data']['SubTotal'] = total_amount - total_gst - total_additional_cost
+            
+            logger.info(f"💰 CALCULATED TOTALS:")
+            logger.info(f"   Total: {total_amount}")
+            logger.info(f"   GstTotal: {total_gst}")
+            logger.info(f"   AdditionalCost: {total_additional_cost}")
+            logger.info(f"   SubTotal: {retro_data['data']['SubTotal']}")
+            
             # Store the entries for later use in send_to_api
             retro_data['_gst_data_entries'] = gst_data_entries
             retro_data['_a_cost_data_entries'] = a_cost_data_entries
+            
+            # CRITICAL: Preserve original api_data fields so they don't get lost
+            # (but keep the overwritten ReferenceNumber to avoid duplicates)
+            for key, value in api_data.items():
+                if key not in retro_data:
+                    retro_data[key] = value
             
             logger.info(f"  Final GST entries count: {len(gst_data_entries)}")
             logger.info(f"  Final Cost entries count: {len(a_cost_data_entries)}")
@@ -540,8 +580,8 @@ class APINeonToRetroMapper:
                 'Content-Type': 'application/x-www-form-urlencoded'
             }
             
-            # Transform data to match the expected format
-            transformed_data = self._transform_for_retro_api(api_data)
+            # Use the already transformed data (no double transformation)
+            transformed_data = api_data
             
             # COMPREHENSIVE DEBUG LOGGING
             logger.info("=" * 80)
@@ -579,11 +619,15 @@ class APINeonToRetroMapper:
             # Prepare form data
             form_data = aiohttp.FormData()
             
+            # Add masterEdit first (CRITICAL - must be string 'false')
+            form_data.add_field('masterEdit', 'false')
+            logger.info(f"  📝 Form field 'masterEdit': 'false'")
+            
             # Add regular fields
             for key, value in transformed_data.items():
-                if key.startswith('_'):
-                    continue  # Skip internal fields
-                if value is not None and value != "":
+                if key.startswith('_') or key == 'masterEdit':
+                    continue  # Skip internal fields and masterEdit (already added)
+                if (value is not None and value != ""):
                     # Special handling for different value types
                     if isinstance(value, bool):
                         str_value = 'true' if value else 'false'
@@ -634,7 +678,32 @@ class APINeonToRetroMapper:
                     data=form_data
                 ) as response:
                     response_text = await response.text()
-                    logger.info(f"📡 API Response for {api_data.get('invoice_no', 'Unknown')}: Status={response.status}, Response={response_text}")
+                    logger.info(f"📡 RAW API Response for {api_data.get('invoice_no', 'Unknown')}:")
+                    logger.info(f"  Status: {response.status}")
+                    logger.info(f"  Headers: {dict(response.headers)}")
+                    logger.info(f"  Raw Response: {response_text}")
+                    
+                    # Try to parse JSON response
+                    try:
+                        parsed_response = json.loads(response_text)
+                        logger.info(f"  Parsed JSON: {parsed_response}")
+                        
+                        # Check if it's a list with response objects
+                        if isinstance(parsed_response, list) and len(parsed_response) > 0:
+                            first_item = parsed_response[0]
+                            if isinstance(first_item, dict):
+                                response_success = first_item.get('response', False)
+                                response_message = first_item.get('message', '')
+                                logger.info(f"  SUCCESS FLAG: {response_success}")
+                                logger.info(f"  MESSAGE: {response_message}")
+                                
+                                # CRITICAL: Check if response is actually false
+                                if not response_success:
+                                    logger.error(f"🚨 RETRO API REJECTED THE DATA: {response_message}")
+                                    return False
+                                    
+                    except json.JSONDecodeError:
+                        logger.warning("⚠️ Response is not valid JSON")
                     
                     if response.status == 200 or response.status == 201:
                         logger.info(f"✅ Successfully sent data to API: {api_data.get('invoice_no', 'Unknown')}")
