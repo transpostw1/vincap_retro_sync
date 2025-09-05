@@ -199,11 +199,41 @@ class APINeonToRetroMapper:
             return False
     
     async def authenticate(self):
-        """Authenticate with Retro API (placeholder - using session cookies)"""
-        # For now, we'll use the existing session cookie approach
-        # This can be enhanced later with proper authentication
-        self.session_cookies = {"ASP.NET_SessionId": "gaiwuhwq5vfufbnkyxds0t0c"}
-        return True
+        """Authenticate with Retro API and get fresh session cookies"""
+        try:
+            auth_url = f"{self.auth_api_url}/InvoiceManager/DoLogin"
+            
+            async with aiohttp.ClientSession() as session:
+                # Prepare login data
+                auth_data = aiohttp.FormData()
+                auth_data.add_field('UserName', self.username)
+                auth_data.add_field('Password', self.password)
+                
+                logger.info("🔐 Authenticating with Retro API...")
+                
+                async with session.post(auth_url, data=auth_data) as response:
+                    if response.status == 200:
+                        # Extract session cookies
+                        cookies = {}
+                        for cookie in response.cookies:
+                            cookies[cookie.key] = cookie.value
+                        
+                        if cookies:
+                            self.session_cookies = cookies
+                            logger.info(f"✅ Authentication successful! Got session cookies: {list(cookies.keys())}")
+                            return True
+                        else:
+                            logger.error("❌ Authentication failed: No session cookies received")
+                            return False
+                    else:
+                        logger.error(f"❌ Authentication failed: HTTP {response.status}")
+                        response_text = await response.text()
+                        logger.error(f"Response: {response_text[:200]}...")
+                        return False
+                        
+        except Exception as e:
+            logger.error(f"❌ Authentication error: {e}")
+            return False
     
     async def send_to_retro(self, neon_data):
         """Send data to Retro using the proven FIXED DATA STRUCTURE approach"""
@@ -294,15 +324,20 @@ class APINeonToRetroMapper:
                 for entry in cost_entries:
                     form_data.add_field('aCostData', json.dumps(entry))
                 
-                # Send request
+                # Send request with dynamic session cookies
                 headers = {
                     'Accept': 'application/json, text/plain, */*',
                     'Accept-Encoding': 'gzip, deflate',
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Connection': 'keep-alive',
-                    'Cookie': 'ASP.NET_SessionId=gaiwuhwq5vfufbnkyxds0t0c',
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
+                
+                # Add session cookies if available
+                if self.session_cookies:
+                    cookie_string = '; '.join([f"{key}={value}" for key, value in self.session_cookies.items()])
+                    headers['Cookie'] = cookie_string
+                    logger.info(f"🍪 Using session cookies: {cookie_string}")
                 
                 async with session.post(self.retro_api_url, data=form_data, headers=headers) as response:
                     logger.info(f"📡 Response Status: {response.status}")
