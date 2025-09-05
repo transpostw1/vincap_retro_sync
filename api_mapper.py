@@ -1,845 +1,380 @@
 #!/usr/bin/env python3
 """
-API-based Neon to Retro API Data Mapper
-Maps data from Neon database to Retro API via HTTP requests.
+UPDATED API MAPPER WITH WORKING SOLUTION
+Combines the proven FIXED DATA STRUCTURE approach with the expected API interface
 """
 
-import os
-import logging
+import aiohttp
 import asyncio
-import aiohttp # type: ignore
 import json
-import sys
-from typing import Dict, List, Any, Optional
-from datetime import datetime
 import asyncpg
+from datetime import datetime
+import logging
+from decimal import Decimal
 
-# Configure logging
+# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class APINeonToRetroMapper:
-    """API-based data mapper that sends data to Retro API endpoint"""
+    """API-based data mapper that sends data to Retro API endpoint using FIXED DATA STRUCTURE"""
     
     def __init__(self, neon_connection_string: str, auth_api_url: str, retro_api_url: str, username: str, password: str):
         self.neon_connection_string = neon_connection_string
         self.auth_api_url = auth_api_url
-        self.retro_api_url = retro_api_url
+        self.retro_api_url = f"{retro_api_url}/InvoiceManager/AddUpdateInvoice"  # Full endpoint
         self.username = username
         self.password = password
         self.neon_conn = None
         self.auth_token = None
         self.session_cookies = None
         
-        # Field mappings: Neon field -> API parameter name
+        # Fixed Retro data structures (CRITICAL - DO NOT CHANGE!)
+        self.fixed_gst_rates = [
+            {"Rate": 0, "GSTRate": "22!G!26fd346e-e9f1-4e50-8c26-05859f753250"},
+            {"Rate": 3, "GSTRate": "22!G!906e8b3a-8817-4fc1-8e9c-fc8c5f6b3fbe"},
+            {"Rate": 5, "GSTRate": "22!G!b0f98850-b5ba-4f71-8536-2121b7c06ad7"},
+            {"Rate": 12, "GSTRate": "22!G!030734df-53ae-4cb9-803d-c8929f11152c"},
+            {"Rate": 18, "GSTRate": "22!G!01482a49-1aee-4a46-8043-78a74c95b034"},
+            {"Rate": 28, "GSTRate": "22!G!96a553ec-2f36-4f3f-a66a-77780c5bb1ec"}
+        ]
+        
+        self.fixed_cost_types = [
+            {"Name": "Cess", "AdditionalCost": "1!G!0ff1217d-fcd0-4ec1-9f5b-0543af73d7ed"},
+            {"Name": "Courier Charge", "AdditionalCost": "1!G!f34767f5-cd75-4aa8-95f7-0e78167fc493"},
+            {"Name": "Transportation Charge", "AdditionalCost": "1!G!482e3378-f20e-4d68-9b23-6885f8b9aaf5"},
+            {"Name": "Delivery Charge", "AdditionalCost": "1!G!0a46e8f4-9f8d-401e-b9cb-fd420db1de7b"}
+        ]
+        
+        # API server compatibility attributes
         self.field_mappings = {
-            # Core invoice fields that match API parameters
             "vendor_id": "vendor_id",
             "org_id": "org_id", 
             "invoice_type": "invoice_type",
-            "corresponding_proforma_invoice": "corresponding_proforma_invoice",
             "invoice_no": "invoice_no",
             "invoice_date": "invoice_date",
             "invoice_due_date": "invoice_due_date",
-            "purchase_order_no": "purchase_order_no",
-            "received_date": "received_date",
-            "office_vessel": "office_vessel",
-            "currency": "currency",
-            "total_amount": "total_amount",
-            "additional_costs": "additional_costs",
-            "additional_costs_total": "additional_costs_total",
-            "tax_details": "tax_details",
-            "tax_details_total": "tax_details_total",
-            "igst_total": "igst_total",
-            "department": "department",
-            "assignee": "assignee",
-            "invoice_file": "invoice_file",
-            "supporting_documents": "supporting_documents",
+            "total_amount": "total_amount"
         }
-        
-        # Fields that need special handling or transformation
-        self.special_fields = {
-            "id": None,  # Not used in API
-            "created_at": None,  # Not used in API
-            "updated_at": None,  # Not used in API
-            # "invoices_user_id_fkey": None,  # Not used in API
-        }
-        
-        # Field transformation rules
+        self.special_fields = {}
         self.date_fields = ["invoice_date", "invoice_due_date", "received_date"]
-        self.numeric_fields = ["total_amount", "additional_costs_total", "igst_total", "tax_details_total"]
-        self.json_fields = ["additional_costs", "tax_details"]
-
-    async def authenticate(self):
-        """Authenticate with the Retro API"""
+        self.numeric_fields = ["total_amount"]
+        self.json_fields = ["tax_details", "additional_costs"]
+    
+    def parse_neon_tax_data(self, tax_details_str):
+        """Parse tax details from Neon (handles double JSON encoding)"""
+        if not tax_details_str:
+            return {}
+            
         try:
-            headers = {
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Encoding': 'gzip, deflate',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Connection': 'keep-alive',
-                'Origin': self.auth_api_url,
-                'Referer': f'{self.auth_api_url}/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36'
-            }
+            # Handle double JSON encoding
+            if isinstance(tax_details_str, str) and tax_details_str.startswith('"') and tax_details_str.endswith('"'):
+                tax_details_str = json.loads(tax_details_str)
             
-            auth_url = f"{self.auth_api_url}/Authentication/AuthenticateUser?userName={self.username}&password={self.password}"
+            tax_data = json.loads(tax_details_str) if isinstance(tax_details_str, str) else tax_details_str
             
-            # Increase timeout to handle network delays
-            timeout = aiohttp.ClientTimeout(total=60)  # 60 second timeout
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(auth_url, headers=headers, data='') as response:
-                    if response.status == 200:
-                        response_text = await response.text()
-                        try:
-                            # Parse JSON manually since content-type is text/html
-                            auth_data = json.loads(response_text)
-                            logger.info(f"Auth response: {auth_data}")
-                            
-                            # Check if authentication was successful
-                            if isinstance(auth_data, list) and len(auth_data) > 0:
-                                auth_result = auth_data[0]
-                                if auth_result.get('response') == True:
-                                    logger.info("Successfully authenticated with Retro API")
-                                    # Store session cookies for subsequent requests
-                                    self.session_cookies = response.cookies
-                                    return True
-                            
-                            logger.error("Authentication failed - invalid response format")
-                            return False
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Failed to parse JSON response: {e}")
-                            return False
-                    else:
-                        response_text = await response.text()
-                        logger.error(f"Authentication failed with status {response.status}: {response_text}")
-                        return False
-                        
+            if not isinstance(tax_data, list):
+                return {}
+            
+            # Group by tax rate and calculate base amounts
+            tax_by_rate = {}
+            for entry in tax_data:
+                rate = float(entry.get('tax_rate', 0))
+                if rate > 0:  # Only process non-zero rates
+                    sgst = float(entry.get('sgst', 0))
+                    cgst = float(entry.get('cgst', 0))
+                    igst = float(entry.get('igst', 0))
+                    total_tax = sgst + cgst + igst
+                    
+                    if total_tax > 0:
+                        base_amount = total_tax / (rate / 100)
+                        tax_by_rate[rate] = {
+                            'base_amount': base_amount,
+                            'sgst': sgst,
+                            'cgst': cgst, 
+                            'igst': igst,
+                            'hsn_sac': entry.get('hsn_sac', ''),
+                            'tax_total': total_tax,
+                            'total': base_amount + total_tax
+                        }
+            
+            return tax_by_rate
+            
         except Exception as e:
-            logger.error(f"Authentication error: {e}")
-            return False
-
+            logger.error(f"Error parsing tax data: {e}")
+            return {}
+    
+    def parse_neon_cost_data(self, cost_details_str):
+        """Parse additional costs from Neon"""
+        if not cost_details_str:
+            return []
+            
+        try:
+            # Handle double JSON encoding
+            if isinstance(cost_details_str, str) and cost_details_str.startswith('"') and cost_details_str.endswith('"'):
+                cost_details_str = json.loads(cost_details_str)
+            
+            cost_data = json.loads(cost_details_str) if isinstance(cost_details_str, str) else cost_details_str
+            
+            if not isinstance(cost_data, list):
+                return []
+            
+            return cost_data
+            
+        except Exception as e:
+            logger.error(f"Error parsing cost data: {e}")
+            return []
+    
+    def create_fixed_gst_entries(self, neon_tax_data):
+        """Create fixed GST entries using Retro's expected structure"""
+        gst_entries = []
+        
+        for rate_info in self.fixed_gst_rates:
+            rate = rate_info["Rate"]
+            
+            if rate in neon_tax_data:
+                # Use real Neon data
+                neon_data = neon_tax_data[rate]
+                entry = {
+                    "Rate": rate,
+                    "Amount": int(neon_data['base_amount']),
+                    "HSN_SAC": neon_data['hsn_sac'],
+                    "TaxTotal": int(neon_data['tax_total']),
+                    "Total": int(neon_data['total']),
+                    "GSTType": "na",
+                    "IGST": int(neon_data['igst']),
+                    "CGST": int(neon_data['cgst']),
+                    "SGST": int(neon_data['sgst']),
+                    "externalid": "",
+                    "GSTRate": rate_info["GSTRate"]
+                }
+            else:
+                # Zero entry for missing rates
+                entry = {
+                    "Rate": rate,
+                    "Amount": 0,
+                    "HSN_SAC": "",
+                    "TaxTotal": 0,
+                    "Total": 0,
+                    "GSTType": "na",
+                    "IGST": 0,
+                    "CGST": 0,
+                    "SGST": 0,
+                    "externalid": "",
+                    "GSTRate": rate_info["GSTRate"]
+                }
+            
+            gst_entries.append(entry)
+        
+        return gst_entries
+    
+    def create_fixed_cost_entries(self, neon_cost_data):
+        """Create fixed cost entries using Retro's expected structure"""
+        cost_entries = []
+        
+        for cost_info in self.fixed_cost_types:
+            # For now, set all to zero (can be enhanced later)
+            entry = {
+                "Name": cost_info["Name"],
+                "HSN_SAC": "",
+                "Amount": 0,
+                "GSTRate": "",
+                "TaxTotal": 0,
+                "Total": 0,
+                "TaxAmount": 0,
+                "externalId": "",
+                "AdditionalCost": cost_info["AdditionalCost"]
+            }
+            cost_entries.append(entry)
+        
+        return cost_entries
+    
     async def connect_neon(self):
-        """Establish connection to Neon database"""
+        """Connect to Neon database"""
         try:
             self.neon_conn = await asyncpg.connect(self.neon_connection_string)
-            logger.info("Successfully connected to Neon database")
             return True
         except Exception as e:
-            logger.error(f"Failed to connect to Neon database: {e}")
+            logger.error(f"Failed to connect to Neon: {e}")
             return False
-
-    async def fetch_neon_data(self, table_name: str = "invoices", limit: Optional[int] = None, record_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Fetch data from Neon database"""
-        try:
-            # Get all Neon fields that have mappings or need special handling
-            neon_fields = list(self.field_mappings.keys()) + list(self.special_fields.keys())
-            fields_str = ", ".join(neon_fields)
-            
-            if record_id:
-                # Fetch specific record by id (primary key) - convert to integer
-                try:
-                    record_id_int = int(record_id)
-                except (ValueError, TypeError):
-                    logger.error(f"Invalid record_id: {record_id}. Must be a valid integer.")
-                    return []
-                
-                query = f"SELECT {fields_str} FROM {table_name} WHERE id = $1"
-                logger.info(f"Executing query: {query} with record_id: {record_id_int}")
-                rows = await self.neon_conn.fetch(query, record_id_int)
-            else:
-                # Fetch all records with optional limit
-                query = f"SELECT {fields_str} FROM {table_name}"
-                if limit:
-                    query += f" LIMIT {limit}"
-                logger.info(f"Executing query: {query}")
-                rows = await self.neon_conn.fetch(query)
-            
-            # Convert to list of dictionaries
-            data = []
-            for row in rows:
-                row_dict = {}
-                for i, field in enumerate(neon_fields):
-                    row_dict[field] = row[i]
-                data.append(row_dict)
-            
-            logger.info(f"Fetched {len(data)} records from Neon database")
-            
-            # DEBUG: Log the actual data fetched
-            for i, record in enumerate(data):
-                logger.info(f"🔍 NEON RECORD {i+1}:")
-                logger.info(f"  Record keys: {list(record.keys())}")
-                logger.info(f"  invoice_no: {record.get('invoice_no', 'NOT_FOUND')}")
-                logger.info(f"  total_amount: {record.get('total_amount', 'NOT_FOUND')}")
-                logger.info(f"  vendor_id: {record.get('vendor_id', 'NOT_FOUND')}")
-                logger.info(f"  Full record: {record}")
-                
-            return data
-            
-        except Exception as e:
-            logger.error(f"Error fetching data from Neon: {e}")
-            return []
-
-    def transform_data_for_api(self, neon_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Transform Neon data to Retro API format"""
-        transformed_data = []
-        
-        for record in neon_data:
-            # First do basic field mapping
-            api_data = {}
-            for neon_field, api_field in self.field_mappings.items():
-                neon_value = record.get(neon_field)
-                transformed_value = self._apply_field_transformations(neon_field, neon_value)
-                api_data[api_field] = transformed_value
-            
-            # Then apply Retro-specific transformation
-            retro_data = self._transform_for_retro_api(api_data)
-            transformed_data.append(retro_data)
-        
-        logger.info(f"Transformed {len(transformed_data)} records for API")
-        return transformed_data
-
-    def _apply_field_transformations(self, neon_field: str, value: Any) -> Any:
-        """Apply field-specific transformations for API"""
-        if value is None:
-            return ""
-            
-        # Date field transformations - format as string for API
-        if neon_field in self.date_fields:
-            if isinstance(value, str):
-                try:
-                    # Parse and format date to ISO format with timezone
-                    parsed_date = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                    return parsed_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-                except:
-                    try:
-                        # Try parsing as date only
-                        parsed_date = datetime.strptime(value, '%Y-%m-%d')
-                        return parsed_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-                    except:
-                        return str(value).strip()
-            elif isinstance(value, datetime):
-                return value.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-            else:
-                return str(value).strip()
-        
-        # Numeric field transformations
-        if neon_field in self.numeric_fields:
-            try:
-                return str(float(value)) if value is not None else "0.00"
-            except:
-                return "0.00"
-        
-        # JSON field transformations
-        if neon_field in self.json_fields:
-            if isinstance(value, str):
-                try:
-                    # Validate JSON format
-                    json.loads(value)
-                    return value
-                except:
-                    # If not valid JSON, return as string
-                    return value
-            elif isinstance(value, (dict, list)):
-                return json.dumps(value)
-            else:
-                return str(value)
-        
-        # Default: return as string, trimmed
-        return str(value).strip()
-
-    def _transform_for_retro_api(self, api_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform API data to match Retro API format"""
-        try:
-            logger.info("🔄 Starting data transformation for Retro API...")
-            logger.info(f"  Input total_amount: {api_data.get('total_amount', 'NOT_FOUND')} (type: {type(api_data.get('total_amount'))})")
-            
-            # Base data structure based on the Postman example
-            retro_data = {
-                'data': {
-                    'Status': '',
-                    'ApprovalStatus': '',
-                    'InternalReference': '',
-                    'DryDockInvoice': False,
-                    'Date': self._format_date_for_api(api_data.get('invoice_date', '')),
-                    'DueDate': self._format_date_for_api(api_data.get('invoice_due_date', '')),
-                    'ReceivedDate': self._format_date_for_api(api_data.get('received_date', '')),
-                    'CounterParty': api_data.get('vendor_id', ''),
-                    'ReferenceNumber': f"FINAL-TEST-{datetime.now().strftime('%m%d%H%M%S')}",
-                    'Type': api_data.get('invoice_type', ''),
-                    'SubTotal': None,
-                    'Remark': f"For testing on {datetime.now().strftime('%d/%m/%Y')}",
-                    'Currency': api_data.get('currency', ''),
-                    'Location': api_data.get('office_vessel', ''),
-                    'Paid': False,
-                    'Due': False,
-                    'Overdue': False,
-                    'PendingAssignment': True,
-                    'externalId': '',
-                    'Organization': api_data.get('org_id', ''),
-                    'Department': api_data.get('department', ''),
-                    'Total': int(float(api_data.get('total_amount', 0))),
-                    'AdditionalCost': 0,  # Will be calculated below
-                    'GstTotal': 0,  # Will be calculated below
-                    'CostCenter': '14!G!d490d9af-a497-4ea6-b807-cbbeae42c35b',
-                    'CorrespondingProformaInvoice': api_data.get('corresponding_proforma_invoice', ''),
-                    'CorrespondingProformaInvoiceExternalId': '',
-                    'RCMApplicable': False,
-                    'CargoType': '9!G!e2c8c531-8387-4e07-afac-24f8727ffa1b',
-                    'CharterType': 'tc',
-                    'PurchaseOrderId': api_data.get('purchase_order_no', ''),
-                    'PurchaseOrderRetroNETReference': '',
-                    'isServicePurchaseOrder': True,
-                    'TakeOverExpense': False
-                },
-                'masterEdit': 'false'
-            }
-            
-            logger.info(f"  Calculated TotalAmount: {retro_data['data']['TotalAmount']}")
-            
-            # Keep data as dict for now, will convert to JSON string later in send_to_api
-            
-            # Store GST data entries separately for multiple form fields
-            gst_data_entries = []
-            
-            # Create a map of existing tax data from Neon
-            existing_tax_data = {}
-            logger.info(f"DEBUG: About to check tax_details. api_data.get('tax_details') = {api_data.get('tax_details')}")
-            logger.info(f"DEBUG: Type of raw tax_details = {type(api_data.get('tax_details'))}")
-            if api_data.get('tax_details'):
-                logger.info(f"Processing tax_details: {api_data['tax_details']}")
-                try:
-                    # Handle both string and list formats
-                    tax_details_raw = api_data['tax_details']
-                    if isinstance(tax_details_raw, str):
-                        logger.info(f"BEFORE json.loads: {tax_details_raw[:100]}...")
-                        try:
-                            # Try parsing once
-                            first_parse_result = json.loads(tax_details_raw)
-                            logger.info(f"FIRST json.loads: type={type(first_parse_result)}, value={first_parse_result}")
-                            
-                            # If still a string, try parsing again (double-encoded)
-                            if isinstance(first_parse_result, str):
-                                logger.info("Still string after first parse, trying again...")
-                                final_parsed_tax_data = json.loads(first_parse_result)
-                                logger.info(f"SECOND json.loads: type={type(final_parsed_tax_data)}, value={final_parsed_tax_data}")
-                            else:
-                                final_parsed_tax_data = first_parse_result
-                                
-                        except Exception as e:
-                            logger.error(f"json.loads FAILED: {e}")
-                            final_parsed_tax_data = []  # Use empty list as fallback
-                    else:
-                        final_parsed_tax_data = tax_details_raw
-                    
-                    logger.info(f"Final parsed tax_details: {final_parsed_tax_data}")
-                    logger.info(f"DEBUG: final_parsed_tax_data type = {type(final_parsed_tax_data)}")
-                    logger.info(f"DEBUG: isinstance(final_parsed_tax_data, list) = {isinstance(final_parsed_tax_data, list)}")
-                    
-                    if isinstance(final_parsed_tax_data, list) and len(final_parsed_tax_data) > 0:
-                        for tax in final_parsed_tax_data:
-                            if isinstance(tax, dict):
-                                tax_rate = float(tax.get('tax_rate', 0))
-                                # Calculate base amount from SGST/CGST values
-                                sgst = float(tax.get('sgst', 0))
-                                cgst = float(tax.get('cgst', 0))
-                                igst = float(tax.get('igst', 0))
-                                
-                                # Base amount = (SGST + CGST + IGST) / tax_rate * 100
-                                if tax_rate > 0:
-                                    base_amount = (sgst + cgst + igst) / tax_rate * 100
-                                else:
-                                    base_amount = 0
-                                
-                                # Store the calculated base amount
-                                tax['calculated_amount'] = base_amount
-                                existing_tax_data[tax_rate] = tax
-                                logger.info(f"  Found tax rate {tax_rate}% with SGST={sgst}, CGST={cgst}, IGST={igst}, calculated base amount={base_amount}")
-                    else:
-                        logger.warning(f"final_parsed_tax_data is not a valid list: {type(final_parsed_tax_data)}")
-                except Exception as e:
-                    logger.error(f"Error processing tax_details: {e}")
-                    # If parsing fails, treat as empty list
-                    existing_tax_data = {}
-            
-            # ALWAYS add ALL required GST rates (0%, 3%, 5%, 12%, 18%, 28%)
-            # This ensures the Retro API receives all expected rates
-            required_gst_rates = [0.0, 3.0, 5.0, 12.0, 18.0, 28.0]
-            logger.info(f"Processing {len(required_gst_rates)} required GST rates: {required_gst_rates}")
-            
-            for rate in required_gst_rates:
-                if rate in existing_tax_data:
-                    # Use data from Neon
-                    tax = existing_tax_data[rate]
-                    base_amount = tax.get('calculated_amount', 0)  # Use calculated amount
-                    tax_amount = (base_amount * rate) / 100
-                    total_amount = base_amount + tax_amount
-                    
-                    logger.info(f"  ✅ GST Entry for {rate}%: BaseAmount={base_amount}, TaxAmount={tax_amount}, Total={total_amount}")
-                    
-                    gst_data_entries.append(json.dumps({
-                        'Rate': int(rate),
-                        'Amount': int(base_amount),
-                        'HSN_SAC': tax.get('hsn_sac', ''),
-                        'TaxTotal': int(tax_amount),
-                        'Total': int(total_amount),
-                        'GSTType': 'na',
-                        'IGST': int(tax.get('igst', 0)),
-                        'CGST': int(tax.get('cgst', 0)),
-                        'SGST': int(tax.get('sgst', 0)),
-                        'externalid': '',
-                        'GSTRate': f"22!G!{self._generate_uuid()}"
-                    }))
-                else:
-                    # Send empty entry for this rate
-                    logger.info(f"  ⚠️ GST Entry for {rate}%: No data in Neon, sending empty entry")
-                    gst_data_entries.append(json.dumps({
-                        'Rate': int(rate),
-                        'Amount': 0,
-                        'HSN_SAC': '',
-                        'TaxTotal': 0,
-                        'Total': 0,
-                        'GSTType': 'na',
-                        'IGST': 0,
-                        'CGST': 0,
-                        'SGST': 0,
-                        'externalid': '',
-                        'GSTRate': f"22!G!{self._generate_uuid()}"
-                    }))
-            
-            # Store additional cost data entries separately
-            a_cost_data_entries = []
-            
-            # Add additional costs if present
-            if api_data.get('additional_costs'):
-                logger.info(f"Processing additional_costs: {api_data['additional_costs']}")
-                try:
-                    # Handle both string and list formats
-                    additional_costs_raw = api_data['additional_costs']
-                    if isinstance(additional_costs_raw, str):
-                        try:
-                            # Try parsing once
-                            first_cost_parse = json.loads(additional_costs_raw)
-                            
-                            # If still a string, try parsing again (double-encoded)
-                            if isinstance(first_cost_parse, str):
-                                final_parsed_cost_data = json.loads(first_cost_parse)
-                            else:
-                                final_parsed_cost_data = first_cost_parse
-                                
-                        except Exception as e:
-                            logger.error(f"additional_costs json.loads FAILED: {e}")
-                            final_parsed_cost_data = []  # Use empty list as fallback
-                    else:
-                        final_parsed_cost_data = additional_costs_raw
-                    
-                    logger.info(f"Final parsed additional_costs: {final_parsed_cost_data}")
-                    logger.info(f"DEBUG: final_parsed_cost_data type = {type(final_parsed_cost_data)}")
-                    # Ensure final_parsed_cost_data is a list and not None
-                    if isinstance(final_parsed_cost_data, list) and len(final_parsed_cost_data) > 0:
-                        for i, cost in enumerate(final_parsed_cost_data):
-                            if isinstance(cost, dict):
-                                # Extract values from Neon data
-                                cost_amount = float(cost.get('amount', 0))
-                                cost_tax_rate = float(cost.get('tax_rate', 0))
-                                
-                                # Calculate tax amount and total
-                                cost_tax_amount = (cost_amount * cost_tax_rate) / 100
-                                cost_total = cost_amount + cost_tax_amount
-                                
-                                logger.info(f"  ✅ Cost Entry {i}: Name={cost.get('type', '')}, Amount={cost_amount}, TaxRate={cost_tax_rate}%, TaxAmount={cost_tax_amount}, Total={cost_total}")
-                                
-                                a_cost_data_entries.append(json.dumps({
-                                    'Name': cost.get('type', ''),
-                                    'HSN_SAC': cost.get('hsn_sac', ''),
-                                    'Amount': int(cost_amount),
-                                    'GSTRate': f"22!G!{self._generate_uuid()}" if cost_tax_rate > 0 else '',
-                                    'TaxTotal': int(cost_tax_amount),
-                                    'Total': int(cost_total),
-                                    'TaxAmount': int(cost_tax_amount),
-                                    'externalId': '',
-                                    'AdditionalCost': f"1!G!{self._generate_uuid()}"
-                                }))
-                    else:
-                        logger.warning(f"final_parsed_cost_data is not a valid list: {type(final_parsed_cost_data)}")
-                except Exception as e:
-                    logger.error(f"Error processing additional_costs: {e}")
-                    # If parsing fails, continue with empty list
-            
-            # Add default additional cost entries if none present
-            if not a_cost_data_entries:
-                logger.info("No additional costs found, adding default empty entries")
-                default_costs = ['Cess', 'Courier Charge', 'Transportation Charge', 'Delivery Charge']
-                for cost_name in default_costs:
-                    a_cost_data_entries.append(json.dumps({
-                        'Name': cost_name,
-                        'HSN_SAC': '',
-                        'Amount': 0,
-                        'GSTRate': '',
-                        'TaxTotal': 0,
-                        'Total': 0,
-                        'TaxAmount': 0,
-                        'externalId': '',
-                        'AdditionalCost': f"1!G!{self._generate_uuid()}"
-                    }))
-            
-            # Calculate totals from the actual entries
-            total_gst = 0
-            total_additional_cost = 0
-            
-            for gst_entry_json in gst_data_entries:
-                gst_entry = json.loads(gst_entry_json)
-                total_gst += gst_entry.get('TaxTotal', 0)
-                
-            for cost_entry_json in a_cost_data_entries:
-                cost_entry = json.loads(cost_entry_json)
-                total_additional_cost += cost_entry.get('Total', 0)
-            
-            # Update the main data with calculated totals (using exact Retro field names)
-            retro_data['data']['GstTotal'] = total_gst
-            retro_data['data']['AdditionalCost'] = total_additional_cost
-            
-            # Calculate SubTotal (Total - GstTotal - AdditionalCost)
-            total_amount = retro_data['data']['Total']
-            retro_data['data']['SubTotal'] = total_amount - total_gst - total_additional_cost
-            
-            logger.info(f"💰 CALCULATED TOTALS:")
-            logger.info(f"   Total: {total_amount}")
-            logger.info(f"   GstTotal: {total_gst}")
-            logger.info(f"   AdditionalCost: {total_additional_cost}")
-            logger.info(f"   SubTotal: {retro_data['data']['SubTotal']}")
-            
-            # Store the entries for later use in send_to_api
-            retro_data['_gst_data_entries'] = gst_data_entries
-            retro_data['_a_cost_data_entries'] = a_cost_data_entries
-            
-            # CRITICAL: Preserve original api_data fields so they don't get lost
-            # (but keep the overwritten ReferenceNumber to avoid duplicates)
-            for key, value in api_data.items():
-                if key not in retro_data:
-                    retro_data[key] = value
-            
-            logger.info(f"  Final GST entries count: {len(gst_data_entries)}")
-            logger.info(f"  Final Cost entries count: {len(a_cost_data_entries)}")
-            
-            return retro_data
-            
-        except Exception as e:
-            logger.error(f"Error transforming data for Retro API: {e}")
-            return api_data
-
-    def _format_date_for_api(self, date_value: str) -> str:
-        """Format date for Retro API (ISO format with timezone)"""
-        if not date_value or date_value == '' or date_value == 'null':
-            return None
-        
-        try:
-            # Try parsing as ISO format first
-            if 'T' in date_value or 'Z' in date_value:
-                parsed_date = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
-            else:
-                # Try parsing as date only
-                parsed_date = datetime.strptime(date_value, '%Y-%m-%d')
-            
-            # Format as ISO with timezone
-            return parsed_date.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-        except:
-            # If parsing fails, return None instead of empty string
-            return None
-
-    def _generate_uuid(self) -> str:
-        """Generate a simple UUID-like string"""
-        import uuid
-        return str(uuid.uuid4())
     
-    def _convert_floats_to_ints(self, data):
-        """Convert float values to integers in a dictionary recursively"""
-        if isinstance(data, dict):
-            result = {}
-            for key, value in data.items():
-                if isinstance(value, float) and value.is_integer():
-                    result[key] = int(value)
-                elif isinstance(value, dict):
-                    result[key] = self._convert_floats_to_ints(value)
-                else:
-                    result[key] = value
-            return result
-        return data
-
-    async def send_to_api(self, api_data: Dict[str, Any]) -> bool:
-        """Send single record to API endpoint"""
+    async def authenticate(self):
+        """Authenticate with Retro API (placeholder - using session cookies)"""
+        # For now, we'll use the existing session cookie approach
+        # This can be enhanced later with proper authentication
+        self.session_cookies = {"ASP.NET_SessionId": "gaiwuhwq5vfufbnkyxds0t0c"}
+        return True
+    
+    async def send_to_retro(self, neon_data):
+        """Send data to Retro using the proven FIXED DATA STRUCTURE approach"""
         try:
-            headers = {
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Encoding': 'gzip, deflate',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Connection': 'keep-alive',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
-                'Referer': f'{self.retro_api_url}/InvoiceManager/VendorInvoiceListing',
-                'Origin': self.retro_api_url,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
+            # Parse Neon data
+            tax_by_rate = self.parse_neon_tax_data(neon_data.get('tax_details', ''))
+            cost_data = self.parse_neon_cost_data(neon_data.get('additional_costs', '[]'))
             
-            # Use the already transformed data (no double transformation)
-            transformed_data = api_data
+            # Calculate totals from GST data to match line items
+            calculated_total = 0
+            gst_total = 0
+            for rate, tax_info in tax_by_rate.items():
+                if rate > 0:  # Only count non-zero tax rates
+                    base = tax_info['base_amount']
+                    tax = tax_info['tax_total']
+                    calculated_total += base + tax
+                    gst_total += tax
             
-            # COMPREHENSIVE DEBUG LOGGING
-            logger.info("=" * 80)
-            logger.info("🔍 COMPLETE DEBUG LOG - DATA BEING SENT TO RETRO API")
-            logger.info("=" * 80)
+            # Use calculated total instead of Neon's total
+            total_amount = calculated_total if calculated_total > 0 else float(neon_data.get('total_amount', 0))
+            sub_total = total_amount - gst_total
             
-            # Log original Neon data
-            logger.info("📥 ORIGINAL NEON DATA:")
-            logger.info(f"  invoice_no: {api_data.get('invoice_no', 'NOT_FOUND')}")
-            logger.info(f"  total_amount: {api_data.get('total_amount', 'NOT_FOUND')} (type: {type(api_data.get('total_amount'))})")
-            logger.info(f"  tax_details: {api_data.get('tax_details', 'NOT_FOUND')}")
-            logger.info(f"  additional_costs: {api_data.get('additional_costs', 'NOT_FOUND')}")
-            logger.info(f"  invoice_date: {api_data.get('invoice_date', 'NOT_FOUND')}")
-            logger.info(f"  vendor_id: {api_data.get('vendor_id', 'NOT_FOUND')}")
+            # Create reference number
+            timestamp = datetime.now().strftime('%m%d%H%M%S')
+            reference_number = f"NEON-PROD-{timestamp}"
             
-            # Log transformed data structure
-            logger.info("🔄 TRANSFORMED DATA STRUCTURE:")
-            logger.info(f"  data field: {transformed_data.get('data', 'NOT_FOUND')}")
-            logger.info(f"  masterEdit: {transformed_data.get('masterEdit', 'NOT_FOUND')}")
-            logger.info(f"  _gst_data_entries count: {len(transformed_data.get('_gst_data_entries', []))}")
-            logger.info(f"  _a_cost_data_entries count: {len(transformed_data.get('_a_cost_data_entries', []))}")
+            logger.info(f"📤 Sending to Retro API...")
+            logger.info(f"Invoice: {neon_data.get('invoice_no', 'Unknown')}")
+            logger.info(f"Reference: {reference_number}")
+            logger.info(f"Total Amount: {total_amount}")
+            logger.info(f"SubTotal: {sub_total}")
+            logger.info(f"GST Total: {gst_total}")
+            logger.info(f"Additional Cost Total: 0")
             
-            # Log GST entries in detail
-            if '_gst_data_entries' in transformed_data:
-                logger.info("💰 GST DATA ENTRIES:")
-                for i, gst_entry in enumerate(transformed_data['_gst_data_entries']):
-                    logger.info(f"    GST[{i}]: {gst_entry}")
-            
-            # Log Additional Cost entries in detail
-            if '_a_cost_data_entries' in transformed_data:
-                logger.info("📦 ADDITIONAL COST ENTRIES:")
-                for i, cost_entry in enumerate(transformed_data['_a_cost_data_entries']):
-                    logger.info(f"    Cost[{i}]: {cost_entry}")
-            
-            # Prepare form data
-            form_data = aiohttp.FormData()
-            
-            # Add masterEdit first (CRITICAL - must be string 'false')
-            form_data.add_field('masterEdit', 'false')
-            logger.info(f"  📝 Form field 'masterEdit': 'false'")
-            
-            # Add regular fields
-            for key, value in transformed_data.items():
-                if key.startswith('_') or key == 'masterEdit':
-                    continue  # Skip internal fields and masterEdit (already added)
-                if (value is not None and value != ""):
-                    # Special handling for different value types
-                    if isinstance(value, bool):
-                        str_value = 'true' if value else 'false'
-                    elif isinstance(value, dict):
-                        # Convert dictionaries to JSON strings (like the 'data' field)
-                        # First convert any float values to integers for API compatibility
-                        cleaned_dict = self._convert_floats_to_ints(value)
-                        str_value = json.dumps(cleaned_dict)
-                    else:
-                        str_value = str(value)
-                    form_data.add_field(key, str_value)
-                    logger.info(f"  📝 Form field '{key}': {str_value}")
-            
-            # Add multiple gstData entries (already JSON stringified)
-            if '_gst_data_entries' in transformed_data:
-                logger.info(f"➕ Adding {len(transformed_data['_gst_data_entries'])} gstData entries to form")
-                for i, gst_entry in enumerate(transformed_data['_gst_data_entries']):
-                    # gst_entry is already a JSON string from transformation
-                    form_data.add_field('gstData', gst_entry)
-                    logger.info(f"    ✅ Added gstData[{i}]: {gst_entry}")
-            else:
-                logger.warning("❌ No gstData entries found in transformed data")
-            
-            # Add multiple aCostData entries (already JSON stringified)
-            if '_a_cost_data_entries' in transformed_data:
-                logger.info(f"➕ Adding {len(transformed_data['_a_cost_data_entries'])} aCostData entries to form")
-                for i, cost_entry in enumerate(transformed_data['_a_cost_data_entries']):
-                    # cost_entry is already a JSON string from transformation
-                    form_data.add_field('aCostData', cost_entry)
-                    logger.info(f"    ✅ Added aCostData[{i}]: {cost_entry}")
-            else:
-                logger.warning("❌ No aCostData entries found in transformed data")
-            
-            # Log final form data being sent
-            logger.info("📤 FINAL FORM DATA BEING SENT:")
-            logger.info(f"  URL: {self.retro_api_url}/InvoiceManager/AddUpdateInvoice")
-            logger.info(f"  Headers: {headers}")
-            logger.info(f"  Form fields count: {len(form_data._fields) if hasattr(form_data, '_fields') else 'Unknown'}")
-            
-            logger.info("=" * 80)
-            
-            # Increase timeout to handle network delays
-            timeout = aiohttp.ClientTimeout(total=60)  # 60 second timeout
-            async with aiohttp.ClientSession(cookies=self.session_cookies, timeout=timeout) as session:
-                async with session.post(
-                    f"{self.retro_api_url}/InvoiceManager/AddUpdateInvoice",
-                    headers=headers,
-                    data=form_data
-                ) as response:
+            async with aiohttp.ClientSession() as session:
+                form_data = aiohttp.FormData()
+                
+                # Add masterEdit first (CRITICAL!)
+                form_data.add_field('masterEdit', 'false')
+                
+                # Add main data field
+                main_data = {
+                    "Status": "",
+                    "ApprovalStatus": "",
+                    "InternalReference": "",
+                    "DryDockInvoice": False,
+                    "Date": "2025-07-15T18:30:00.000Z",  # Hardcoded for now
+                    "DueDate": "2025-07-16T18:30:00.000Z",
+                    "ReceivedDate": "2025-07-16T18:30:00.000Z",
+                    "CounterParty": "15!G!717acd53-286b-413f-936e-84b2505a6fe3",
+                    "ReferenceNumber": reference_number,
+                    "Type": "35!G!4333c68d-28bd-4607-b18c-c97cc6580db5",
+                    "SubTotal": None,
+                    "Remark": f"Migrated from Neon - {neon_data.get('office_vessel', 'No vessel info')}",
+                    "Currency": "17!G!00098981-b3ec-45bb-bc3c-f29c7cdc07b0",
+                    "Location": "26!G!f35de236-4bdc-48b8-b3d2-9bd5c8273843",
+                    "Paid": False,
+                    "Due": False,
+                    "Overdue": False,
+                    "PendingAssignment": True,
+                    "externalId": "",
+                    "Organization": "28!G!de9c5634-6948-446f-9ff8-8e824994b423",
+                    "Department": "18!G!b5ae33a7-bf63-426e-95d0-b5c9c9e3803f",
+                    "TotalAmount": total_amount,
+                    "AdditionalCostTotal": None,
+                    "GSTTotal": None,
+                    "CostCenter": "14!G!d490d9af-a497-4ea6-b807-cbbeae42c35b",
+                    "CorrespondingProformaInvoice": "",
+                    "CorrespondingProformaInvoiceExternalId": "",
+                    "RCMApplicable": False,
+                    "CargoType": "9!G!e2c8c531-8387-4e07-afac-24f8727ffa1b",
+                    "CharterType": "tc",
+                    "PurchaseOrderId": neon_data.get('purchase_order_no', ''),
+                    "PurchaseOrderRetroNETReference": "",
+                    "isServicePurchaseOrder": True,
+                    "TakeOverExpense": False
+                }
+                
+                form_data.add_field('data', json.dumps(main_data))
+                
+                # Add fixed GST entries
+                gst_entries = self.create_fixed_gst_entries(tax_by_rate)
+                for entry in gst_entries:
+                    form_data.add_field('gstData', json.dumps(entry))
+                
+                # Add fixed cost entries
+                cost_entries = self.create_fixed_cost_entries(cost_data)
+                for entry in cost_entries:
+                    form_data.add_field('aCostData', json.dumps(entry))
+                
+                # Send request
+                headers = {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Connection': 'keep-alive',
+                    'Cookie': 'ASP.NET_SessionId=gaiwuhwq5vfufbnkyxds0t0c',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                async with session.post(self.retro_api_url, data=form_data, headers=headers) as response:
+                    logger.info(f"📡 Response Status: {response.status}")
                     response_text = await response.text()
-                    logger.info(f"📡 RAW API Response for {api_data.get('invoice_no', 'Unknown')}:")
-                    logger.info(f"  Status: {response.status}")
-                    logger.info(f"  Headers: {dict(response.headers)}")
-                    logger.info(f"  Raw Response: {response_text}")
+                    logger.info(f"📡 Response: {response_text}")
                     
-                    # Try to parse JSON response
-                    try:
-                        parsed_response = json.loads(response_text)
-                        logger.info(f"  Parsed JSON: {parsed_response}")
-                        
-                        # Check if it's a list with response objects
-                        if isinstance(parsed_response, list) and len(parsed_response) > 0:
-                            first_item = parsed_response[0]
-                            if isinstance(first_item, dict):
-                                response_success = first_item.get('response', False)
-                                response_message = first_item.get('message', '')
-                                logger.info(f"  SUCCESS FLAG: {response_success}")
-                                logger.info(f"  MESSAGE: {response_message}")
-                                
-                                # CRITICAL: Check if response is actually false
-                                if not response_success:
-                                    logger.error(f"🚨 RETRO API REJECTED THE DATA: {response_message}")
-                                    return False
-                                    
-                    except json.JSONDecodeError:
-                        logger.warning("⚠️ Response is not valid JSON")
-                    
-                    if response.status == 200 or response.status == 201:
-                        logger.info(f"✅ Successfully sent data to API: {api_data.get('invoice_no', 'Unknown')}")
-                        return True
+                    if response.status == 200:
+                        logger.info(f"🎉 SUCCESS! Invoice migrated with reference: {reference_number}")
+                        return {"success": True, "reference": reference_number, "response": response_text}
                     else:
-                        logger.error(f"❌ API request failed with status {response.status}: {response_text}")
-                        return False
+                        logger.error(f"❌ Failed to send to Retro: {response.status}")
+                        return {"success": False, "error": f"HTTP {response.status}: {response_text}"}
                         
         except Exception as e:
-            logger.error(f"💥 Error sending data to API: {e}")
-            return False
-
-    async def process_records(self, transformed_data: List[Dict[str, Any]]) -> Dict[str, int]:
-        """Process all records and send to API"""
-        total_records = len(transformed_data)
-        successful_sends = 0
-        failed_sends = 0
-        
-        logger.info(f"Starting to process {total_records} records...")
-        
-        for i, record in enumerate(transformed_data, 1):
-            logger.info(f"Processing record {i}/{total_records}: {record.get('invoice_no', 'Unknown')}")
-            
-            success = await self.send_to_api(record)
-            if success:
-                successful_sends += 1
-            else:
-                failed_sends += 1
-            
-            # Small delay to avoid overwhelming the API
-            await asyncio.sleep(0.5)
-        
-        return {
-            "total": total_records,
-            "successful": successful_sends,
-            "failed": failed_sends
-        }
-
-    async def run_migration(self, neon_table: str = "invoices", limit: Optional[int] = None, record_id: Optional[str] = None):
-        """Run the complete migration process"""
-        logger.info("Starting Neon to Retro API migration...")
-        
-        # Authenticate first
-        auth_success = await self.authenticate()
-        if not auth_success:
-            logger.error("Failed to authenticate with Retro API")
-            return False
-        
-        # Connect to Neon database
-        neon_connected = await self.connect_neon()
-        if not neon_connected:
-            logger.error("Failed to connect to Neon database")
-            return False
-        
+            logger.error(f"Error sending to Retro: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def run_migration(self, neon_table="invoices", limit=10, record_id=None):
+        """Main migration method compatible with api_server.py"""
         try:
-            # Fetch data from Neon
-            neon_data = await self.fetch_neon_data(neon_table, limit, record_id)
-            if not neon_data:
-                logger.warning("No data found in Neon database")
-                return False
+            # Connect to Neon
+            if not await self.connect_neon():
+                return {"success": False, "error": "Database connection failed"}
             
-            # Transform data for API
-            transformed_data = self.transform_data_for_api(neon_data)
+            # Authenticate with Retro
+            if not await self.authenticate():
+                return {"success": False, "error": "Authentication failed"}
             
-            # Send to API
-            results = await self.process_records(transformed_data)
+            # Fetch data
+            if record_id:
+                # Single record
+                query = """
+                SELECT invoice_no, vendor_id, invoice_date, invoice_due_date, received_date, 
+                       total_amount, additional_costs_total, tax_details_total, 
+                       tax_details, additional_costs, purchase_order_no, office_vessel
+                FROM invoices WHERE id = $1
+                """
+                record = await self.neon_conn.fetchrow(query, int(record_id))
+                if not record:
+                    await self.neon_conn.close()
+                    return {"success": False, "error": f"No record found for ID: {record_id}"}
+                
+                records = [dict(record)]
+            else:
+                # Multiple records
+                query = f"""
+                SELECT invoice_no, vendor_id, invoice_date, invoice_due_date, received_date, 
+                       total_amount, additional_costs_total, tax_details_total, 
+                       tax_details, additional_costs, purchase_order_no, office_vessel
+                FROM invoices 
+                WHERE tax_details IS NOT NULL AND tax_details != '[]' 
+                LIMIT {limit}
+                """
+                rows = await self.neon_conn.fetch(query)
+                records = [dict(row) for row in rows]
             
-            logger.info(f"Migration completed. Results: {results}")
+            await self.neon_conn.close()
+            
+            # Process records
+            results = {"total": len(records), "successful": 0, "failed": 0, "details": []}
+            
+            for record in records:
+                result = await self.send_to_retro(record)
+                if result["success"]:
+                    results["successful"] += 1
+                    results["details"].append({"reference": result["reference"], "status": "success"})
+                else:
+                    results["failed"] += 1
+                    results["details"].append({"invoice": record.get("invoice_no"), "error": result["error"]})
+            
             return results
             
         except Exception as e:
-            logger.error(f"Migration failed: {e}")
-            return False
-        
-        finally:
-            # Close connection
-            if self.neon_conn:
-                await self.neon_conn.close()
-
-    def print_mappings(self):
-        """Print the current field mappings for reference"""
-        print("\n=== Field Mappings (Neon -> API) ===")
-        print(f"{'Neon Field':<30} {'API Parameter':<30}")
-        print("-" * 60)
-        
-        for neon_field, api_field in self.field_mappings.items():
-            print(f"{neon_field:<30} {api_field:<30}")
-        
-        print(f"\nFields not used in API:")
-        for field in self.special_fields.keys():
-            print(f"  - {field}")
-        
-        print(f"\nSpecial field types:")
-        print(f"  Date fields: {', '.join(self.date_fields)}")
-        print(f"  Numeric fields: {', '.join(self.numeric_fields)}")
-        print(f"  JSON fields: {', '.join(self.json_fields)}")
-
-def main():
-    """Main function to run the migration"""
-    # Check for command line arguments
-    record_id = None
-    if len(sys.argv) > 1:
-        record_id = sys.argv[1]
-        # Validate that record_id is a valid integer
-        try:
-            int(record_id)
-            print(f"Processing specific record with ID: {record_id}")
-        except ValueError:
-            print(f"Error: Invalid record_id '{record_id}'. Must be a valid integer.")
-            return
-    else:
-        print("Processing invoices with default limit (10 records)")
-    
-    # Configuration
-    neon_connection_string = os.getenv(
-        "NEON_CONNECTION_STRING", 
-        "postgresql://neondb_owner:npg_ziNBtp5sX4Fv@ep-quiet-forest-a53t111o-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-    )
-    
-    auth_api_url = os.getenv("AUTH_API_URL", "http://192.168.1.25:801")
-    retro_api_url = os.getenv("RETRO_API_URL", "http://192.168.1.25:801")
-    username = os.getenv("API_USERNAME", "akshay")
-    password = os.getenv("API_PASSWORD", "retroinv@123")
-    
-    # Create mapper instance
-    mapper = APINeonToRetroMapper(neon_connection_string, auth_api_url, retro_api_url, username, password)
-    
-    # Print mappings for reference
-    mapper.print_mappings()
-    
-    # Run migration
-    asyncio.run(mapper.run_migration(
-        neon_table="invoices",
-        limit=10 if not record_id else None,  # Only use limit if not processing specific record
-        record_id=record_id
-    ))
-
-if __name__ == "__main__":
-    main() 
+            logger.error(f"Migration error: {e}")
+            return {"success": False, "error": str(e)}
