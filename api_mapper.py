@@ -201,22 +201,31 @@ class APINeonToRetroMapper:
     async def authenticate(self):
         """Authenticate with Retro API and get fresh session cookies"""
         try:
-            auth_url = f"{self.auth_api_url}/InvoiceManager/DoLogin"
+            # Use the correct authentication endpoint with URL parameters
+            auth_url = f"{self.auth_api_url}/Authentication/AuthenticateUser?userName={self.username}&password={self.password.replace('@', '%40')}"
             
             async with aiohttp.ClientSession() as session:
-                # Prepare login data
-                auth_data = aiohttp.FormData()
-                auth_data.add_field('UserName', self.username)
-                auth_data.add_field('Password', self.password)
-                
                 logger.info("🔐 Authenticating with Retro API...")
+                logger.info(f"🔗 Auth URL: {auth_url}")
                 
-                async with session.post(auth_url, data=auth_data) as response:
+                headers = {
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Encoding": "gzip, deflate", 
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Origin": self.auth_api_url,
+                    "Referer": f"{self.auth_api_url}/",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+                
+                async with session.post(auth_url, headers=headers, data="") as response:
                     if response.status == 200:
-                        # Extract session cookies
+                        # Extract session cookies from Set-Cookie headers
                         cookies = {}
-                        for cookie in response.cookies:
-                            cookies[cookie.key] = cookie.value
+                        for cookie_header in response.headers.getall('Set-Cookie', []):
+                            # Parse cookie string like "ASP.NET_SessionId=xyz; path=/; HttpOnly"
+                            cookie_parts = cookie_header.split(';')[0].split('=', 1)
+                            if len(cookie_parts) == 2:
+                                cookies[cookie_parts[0]] = cookie_parts[1]
                         
                         if cookies:
                             self.session_cookies = cookies
