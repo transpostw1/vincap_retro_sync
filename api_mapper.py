@@ -265,9 +265,8 @@ class APINeonToRetroMapper:
             total_amount = calculated_total if calculated_total > 0 else float(neon_data.get('total_amount', 0))
             sub_total = total_amount - gst_total
             
-            # Create reference number
-            timestamp = datetime.now().strftime('%m%d%H%M%S')
-            reference_number = f"NEON-PROD-{timestamp}"
+            # Use original invoice number as reference
+            reference_number = neon_data.get('invoice_no', 'UNKNOWN')
             
             logger.info(f"📤 Sending to Retro API...")
             logger.info(f"Invoice: {neon_data.get('invoice_no', 'Unknown')}")
