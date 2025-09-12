@@ -417,7 +417,14 @@ class APINeonToRetroMapper:
                     results["failed"] += 1
                     results["details"].append({"invoice": record.get("invoice_no"), "error": result["error"]})
             
-            return results
+            # Return consistent format with success field
+            return {
+                "success": results["failed"] == 0,  # Success if no failures
+                "total": results["total"],
+                "successful": results["successful"],
+                "failed": results["failed"],
+                "details": results["details"]
+            }
             
         except Exception as e:
             logger.error(f"Migration error: {e}")

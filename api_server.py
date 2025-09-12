@@ -94,7 +94,7 @@ def get_mapper():
         # Configuration from environment variables
         neon_connection_string = os.getenv(
             "NEON_CONNECTION_STRING", 
-            "postgresql://neondb_owner:npg_ziNBtp5sX4Fv@ep-quiet-forest-a53t111o-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+            "postgresql://neondb_owner:npg_IwBCpJ7b9LUE@ep-young-tree-a1xd0e92-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
         )
         
         auth_api_url = os.getenv("AUTH_API_URL", "http://192.168.1.25:801")
@@ -158,17 +158,20 @@ async def push_data(request: MigrationRequest):
             record_id=request.record_id if request.record_id else None
         )
         
-        if results:
+        if results and results.get('success', False):
             return MigrationResponse(
                 success=True,
                 message="Migration completed successfully",
                 results=results
             )
         else:
+            # Handle case where results exist but contain an error
+            error_msg = results.get('error', 'No results returned') if results else 'No results returned'
             return MigrationResponse(
                 success=False,
                 message="Migration failed",
-                error="No results returned"
+                error=error_msg,
+                results=results
             )
             
     except Exception as e:
